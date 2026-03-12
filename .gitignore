@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+aria.db
+*.db-shm
+*.db-wal
+backups/
