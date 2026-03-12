@@ -7,6 +7,10 @@ import initSqlJs from "sql.js";
 import path from "path";
 import fs from "fs";
 import cron from "node-cron";
+
+import { computeIndicatorsForCloses, scoreToSignal } from "./services/indicators";
+import { fetchOHLCVForTicker, createFetchAndStoreOHLCV } from "./services/ohlcv";
+
 dotenv.config();
 
 const app = express();
@@ -56,8 +60,9 @@ function execAll<T extends Record<string, unknown>>(sql: string): T[] {
   return values.map((row) => Object.fromEntries(columns.map((c, i) => [c, row[i]]))) as T[];
 }
 
-function run(sql: string, params?: Record<string, unknown>): { lastInsertRowid: number } {
-  db.run(sql, params);
+type DbParams = Record<string, string | number | null | undefined>;
+function run(sql: string, params?: DbParams): { lastInsertRowid: number } {
+  db.run(sql, params as import("sql.js").ParamsObject | undefined);
   const rows = db.exec("SELECT last_insert_rowid() AS id");
   const id = rows.length && rows[0].values[0] ? (rows[0].values[0][0] as number) : 0;
   return { lastInsertRowid: id };
@@ -119,128 +124,8 @@ const PRICE_INTERVAL_MS = 5 * 60 * 1000; // 5 min
 const NEWS_INTERVAL_MS = 15 * 60 * 1000; // 15 min
 const SIGNAL_INTERVAL_MS = 5 * 60 * 1000; // 5 min (after prices)
 
-const OHLCV_DAYS = 100;
-
-// WAYPOINT [ohlcv-historical]
-// WHAT: Fetches last 100 days of OHLCV from Alphavantage (stocks: TIME_SERIES_DAILY, crypto: DIGITAL_CURRENCY_DAILY), upserts into ohlcv table.
-// WHY: Historical price data is required for RSI/MACD/MA indicators and backtesting — no indicators without OHLCV.
-// HOW IT HELPS NICO: Enables real technical analysis and evidence-based signal confidence via backtest results.
-
-const ALPHAVANTAGE_BASE = "https://www.alphavantage.co/query";
-
-function alphavantageUrl(params: Record<string, string>): string {
-  const key = process.env.ALPHAVANTAGE_API_KEY?.trim() ?? "";
-  const q = new URLSearchParams({ ...params, apikey: key });
-  return `${ALPHAVANTAGE_BASE}?${q.toString()}`;
-}
-
-type OHLCVRow = { symbol: string; date: string; open: number; high: number; low: number; close: number; volume: number };
-
-function parseOHLCVFromStock(data: Record<string, unknown>): OHLCVRow[] {
-  const series =
-    (data["Time Series (Daily)"] as Record<string, Record<string, string>> | undefined) ??
-    (data["Time Series 1 (Daily)"] as Record<string, Record<string, string>> | undefined);
-  if (!series || typeof series !== "object") return [];
-  return Object.entries(series).map(([date, row]) => ({
-    symbol: "",
-    date,
-    open: parseFloat(row["1. open"] ?? row["1. open (USD)"] ?? "0") || 0,
-    high: parseFloat(row["2. high"] ?? row["2a. high (USD)"] ?? "0") || 0,
-    low: parseFloat(row["3. low"] ?? row["3a. low (USD)"] ?? "0") || 0,
-    close: parseFloat(row["4. close"] ?? row["4a. close (USD)"] ?? "0") || 0,
-    volume: parseFloat(row["5. volume"] ?? row["5. volume"] ?? "0") || 0,
-  }));
-}
-
-function parseOHLCVFromCrypto(data: Record<string, unknown>, symbol: string): OHLCVRow[] {
-  const key = "Time Series (Digital Currency Daily)";
-  const series = data[key] as Record<string, Record<string, string>> | undefined;
-  if (!series || typeof series !== "object") return [];
-  return Object.entries(series).map(([date, row]) => {
-    const o = row["1a. open (USD)"] ?? row["1. open"] ?? "0";
-    const h = row["2a. high (USD)"] ?? row["2. high"] ?? "0";
-    const l = row["3a. low (USD)"] ?? row["3. low"] ?? "0";
-    const c = row["4a. close (USD)"] ?? row["4. close"] ?? "0";
-    const v = row["5. volume"] ?? "0";
-    return { symbol, date, open: parseFloat(o) || 0, high: parseFloat(h) || 0, low: parseFloat(l) || 0, close: parseFloat(c) || 0, volume: parseFloat(v) || 0 };
-  });
-}
-
-async function fetchOHLCVForTicker(symbol: string): Promise<{ rows: OHLCVRow[]; raw?: string } | null> {
-  const key = process.env.ALPHAVANTAGE_API_KEY?.trim();
-  if (!key) {
-    console.warn("OHLCV: Add ALPHAVANTAGE_API_KEY to .env (free at alphavantage.co)");
-    return null;
-  }
-  const isCrypto = symbol in CRYPTO_COINGECKO_IDS;
-  let url: string;
-  if (isCrypto) {
-    url = alphavantageUrl({ function: "DIGITAL_CURRENCY_DAILY", symbol, market: "USD", outputsize: "full" });
-  } else {
-    url = alphavantageUrl({ function: "TIME_SERIES_DAILY", symbol, outputsize: "compact", datatype: "json" });
-  }
-  try {
-    const res = await fetch(url);
-    const data = (await res.json()) as Record<string, unknown>;
-    const raw = JSON.stringify(data);
-    if (data.Note || data["Error Message"]) {
-      console.warn(`OHLCV ${symbol}:`, (data.Note ?? data["Error Message"]) as string);
-      return null;
-    }
-    let rows: OHLCVRow[];
-    if (isCrypto) {
-      rows = parseOHLCVFromCrypto(data, symbol);
-    } else {
-      const parsed = parseOHLCVFromStock(data);
-      rows = parsed.map((r) => ({ ...r, symbol }));
-    }
-    return { rows: rows.slice(0, OHLCV_DAYS), raw };
-  } catch (e) {
-    console.error(`OHLCV fetch ${symbol}:`, e);
-    return null;
-  }
-}
-
-async function fetchAndStoreOHLCV(): Promise<void> {
-  if (!db) return;
-  const tickers = getWatchedTickers();
-  for (let i = 0; i < tickers.length; i++) {
-    const symbol = tickers[i];
-    const result = await fetchOHLCVForTicker(symbol);
-    if (!result?.rows.length) {
-      console.warn(`OHLCV skip ${symbol} (no data or rate limited)`);
-      await new Promise((r) => setTimeout(r, 13000));
-      continue;
-    }
-    for (const r of result.rows) {
-      db.run(
-        `INSERT OR IGNORE INTO ohlcv (symbol, date, open, high, low, close, volume, source, created_at)
-         VALUES (:symbol, :date, :open, :high, :low, :close, :volume, :source, :created_at)`,
-        {
-          ":symbol": r.symbol,
-          ":date": r.date,
-          ":open": r.open,
-          ":high": r.high,
-          ":low": r.low,
-          ":close": r.close,
-          ":volume": r.volume,
-          ":source": "alphavantage",
-          ":created_at": new Date().toISOString(),
-        }
-      );
-    }
-    if (result.raw) {
-      const latestPrice = result.rows[0];
-      db.run("UPDATE prices SET source_raw = :raw WHERE symbol = :symbol", {
-        ":raw": result.raw.slice(0, 50000),
-        ":symbol": symbol,
-      });
-    }
-    saveDb();
-    console.log(`OHLCV stored ${symbol} (${result.rows.length} bars) [${i + 1}/${tickers.length}]`);
-    await new Promise((r) => setTimeout(r, 13000)); // Alphavantage free: 5 req/min → need ~13s between calls
-  }
-}
+// OHLCV: fetchAndStoreOHLCV created in start() after db init; see server/services/ohlcv.ts
+let fetchAndStoreOHLCV: () => Promise<void>;
 
 type PriceRow = {
   symbol: string;
@@ -411,126 +296,6 @@ No stored memories yet. Claude can call the 'remember' tool to persist important
 
 MEMORY:
 ${lines}`;
-}
-
-// WAYPOINT [technical-indicators]
-// WHAT: Calculates RSI (14), MACD (12,26,9), SMA 20/50 from OHLCV close prices. Pure JS, no deps.
-// WHY: Real technical analysis replaces naive 24h momentum; indicators drive composite signal and backtest.
-// HOW IT HELPS NICO: RSI overbought/oversold, MACD trend direction, MAs for trend confirmation — evidence-based signals.
-
-function ema(values: number[], period: number): number[] {
-  const k = 2 / (period + 1);
-  const out: number[] = [];
-  for (let i = 0; i < values.length; i++) {
-    if (i < period - 1) out.push(NaN);
-    else if (i === period - 1) {
-      let sum = 0;
-      for (let j = 0; j < period; j++) sum += values[j];
-      out.push(sum / period);
-    } else out.push((values[i] - out[i - 1]) * k + out[i - 1]);
-  }
-  return out;
-}
-
-function sma(values: number[], period: number): number[] {
-  const out: number[] = [];
-  for (let i = 0; i < values.length; i++) {
-    if (i < period - 1) out.push(NaN);
-    else {
-      let sum = 0;
-      for (let j = i - period + 1; j <= i; j++) sum += values[j];
-      out.push(sum / period);
-    }
-  }
-  return out;
-}
-
-function calcRSI(closes: number[], period = 14): number {
-  if (closes.length < period + 1) return NaN;
-  let avgGain = 0, avgLoss = 0;
-  for (let i = 1; i <= period; i++) {
-    const ch = closes[i] - closes[i - 1];
-    if (ch > 0) avgGain += ch;
-    else avgLoss -= ch;
-  }
-  avgGain /= period;
-  avgLoss /= period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
-}
-
-function calcMACD(closes: number[], fast = 12, slow = 26, signal = 9): { macd: number; signalLine: number; histogram: number } | null {
-  if (closes.length < slow + signal) return null;
-  const emaFast = ema(closes, fast);
-  const emaSlow = ema(closes, slow);
-  const macdLine: number[] = [];
-  for (let i = 0; i < closes.length; i++) {
-    if (isNaN(emaFast[i]) || isNaN(emaSlow[i])) macdLine.push(NaN);
-    else macdLine.push(emaFast[i] - emaSlow[i]);
-  }
-  const validMacd = macdLine.filter((v) => !isNaN(v));
-  if (validMacd.length < signal) return null;
-  const signalEma = ema(validMacd, signal);
-  const sigVal = signalEma[signalEma.length - 1];
-  const macVal = validMacd[validMacd.length - 1];
-  return { macd: macVal, signal: sigVal, histogram: macVal - sigVal };
-}
-
-function calcSMA(closes: number[], period: number): number {
-  if (closes.length < period) return NaN;
-  let sum = 0;
-  for (let i = closes.length - period; i < closes.length; i++) sum += closes[i];
-  return sum / period;
-}
-
-type IndicatorData = {
-  rsi: number;
-  macd: { macd: number; signal: number; histogram: number };
-  ma20: number;
-  ma50: number;
-  score: number;
-  methodology: "technical_composite";
-};
-
-function computeIndicatorsForCloses(closes: number[]): IndicatorData | null {
-  if (closes.length < 50) return null;
-  const rsi = calcRSI(closes);
-  const macd = calcMACD(closes);
-  const ma20 = calcSMA(closes, 20);
-  const ma50 = calcSMA(closes, 50);
-  if (isNaN(rsi) || !macd || isNaN(ma20) || isNaN(ma50)) return null;
-
-  let score = 0;
-  if (rsi < 30) score += 2;
-  else if (rsi < 45) score += 1;
-  else if (rsi <= 55) score += 0;
-  else if (rsi <= 70) score -= 1;
-  else score -= 2;
-
-  const prevMacd = closes.length >= 2 ? calcMACD(closes.slice(0, -1)) : null;
-  const macdCrossUp = prevMacd && macd.histogram > 0 && prevMacd.histogram <= 0;
-  const macdCrossDown = prevMacd && macd.histogram < 0 && prevMacd.histogram >= 0;
-  if (macdCrossUp) score += 2;
-  else if (macd.histogram > 0) score += 1;
-  else if (macd.histogram < 0) score -= 1;
-  if (macdCrossDown) score -= 2;
-
-  const lastClose = closes[closes.length - 1];
-  if (lastClose > ma20 && lastClose > ma50) score += 2;
-  else if (lastClose > ma20) score += 1;
-  else if (lastClose < ma20 && lastClose < ma50) score -= 2;
-  else score -= 1;
-
-  return { rsi, macd, ma20, ma50, score, methodology: "technical_composite" };
-}
-
-function scoreToSignal(score: number): { signal: string; reasoning: string } {
-  if (score >= 4) return { signal: "STRONG BUY", reasoning: `Composite score +${score}/6: RSI/MACD/MAs align bullish.` };
-  if (score >= 1) return { signal: "BUY", reasoning: `Composite score +${score}/6: moderate bullish.` };
-  if (score >= -1) return { signal: "HOLD", reasoning: `Composite score ${score}/6: wait for clearer signal.` };
-  if (score >= -3) return { signal: "SELL", reasoning: `Composite score ${score}/6: moderate bearish.` };
-  return { signal: "STRONG SELL", reasoning: `Composite score ${score}/6: RSI/MACD/MAs align bearish.` };
 }
 
 // WAYPOINT [signal-generation]
@@ -1148,7 +913,7 @@ async function runMemoryExtraction(userContent: string, assistantContent: string
       tools: [REMEMBER_TOOL],
       tool_choice: { type: "auto" },
       messages: [{ role: "user", content: `${prompt}\n\n---\nUser: ${userContent}\n\nAssistant: ${assistantContent}` }],
-    });
+    } as any);
     const toolUses = (r.content as any[]).filter((c: any) => c.type === "tool_use");
     for (const tu of toolUses as Array<{ name: string; input: any }>) {
       if (tu.name === "remember") await handleToolCall("remember", tu.input);
@@ -1192,7 +957,7 @@ app.post("/api/chat", async (req, res) => {
       tools,
       tool_choice: { type: "auto" },
       messages: currentMessages,
-    });
+    } as any);
 
     while (true) {
       const toolUses = (finalResponse.content as any[]).filter((c: any) => c.type === "tool_use");
@@ -1215,7 +980,7 @@ app.post("/api/chat", async (req, res) => {
         tools,
         tool_choice: { type: "auto" },
         messages: currentMessages,
-      });
+      } as any);
     }
 
     const textBlock = (finalResponse.content as any[]).find((c: any) => c.type === "text") as { text: string } | undefined;
@@ -1490,7 +1255,7 @@ app.post("/api/ohlcv/refresh/:symbol", async (req, res) => {
     return res.status(400).json({ error: `Symbol ${symbol} not in watched list. Add to Memory watchlist or as a position.` });
   }
   try {
-    const result = await fetchOHLCVForTicker(symbol);
+    const result = await fetchOHLCVForTicker(symbol, { cryptoIds: CRYPTO_COINGECKO_IDS });
     if (!result || !result.rows?.length) {
       let detail = "No data returned";
       if (result?.raw) {
@@ -1763,6 +1528,13 @@ async function start() {
   alter("ALTER TABLE memories ADD COLUMN source TEXT");
   alter("ALTER TABLE memories ADD COLUMN created_at TEXT");
   saveDb();
+
+  fetchAndStoreOHLCV = createFetchAndStoreOHLCV({
+    getWatchedTickers,
+    db,
+    saveDb,
+    cryptoIds: CRYPTO_COINGECKO_IDS,
+  });
 
   // Start server immediately so the app is reachable. Run initial fetches in background.
   const hasKey = !!process.env.ANTHROPIC_API_KEY?.trim();
