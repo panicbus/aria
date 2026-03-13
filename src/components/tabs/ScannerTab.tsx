@@ -106,7 +106,7 @@ export function ScannerTab({
   const apiLimitReached = status != null && status.apiCallsRemaining <= 0;
 
   const metricsExplainer = (
-    <div style={{ padding: 12, maxWidth: 340 }}>
+    <div style={{ padding: 12, maxWidth: 510 }}>
       <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 10, color: "#00ff94", fontFamily: "var(--mono)" }}>What do these mean?</div>
       <p style={{ fontSize: 18, lineHeight: 1.55, color: "#aaa", marginBottom: 10, fontFamily: "var(--body)" }}>
         <strong style={{ color: "#00ff94" }}>STRONG BUY</strong> — A bunch of indicators agree this might be a good time to look. We combine RSI (Relative Strength Index—tells you if a stock is overbought or oversold), MACD (Moving Average Convergence Divergence—a momentum indicator), and where the price sits vs its recent averages. When most of those line up in a positive way, we call it a strong buy.

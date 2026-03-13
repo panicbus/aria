@@ -1,10 +1,45 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 import { API } from "../../config";
 import type { BacktestResult } from "../../types";
 
 const BACKTEST_DAYS = [30, 60, 90, 180] as const;
+
+function formatMMDDYY(isoOrStr: string): string {
+  const d = new Date(isoOrStr);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const y = String(d.getFullYear()).slice(-2);
+  return `${m}/${day}/${y}`;
+}
+
+const backtestExplainer = (
+  <div style={{ padding: 12, maxWidth: 540 }}>
+    <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 10, color: "#00ff94", fontFamily: "var(--mono)" }}>What does this do?</div>
+    <p style={{ fontSize: 16, lineHeight: 1.55, color: "#aaa", marginBottom: 10, fontFamily: "var(--body)" }}>
+      A <strong style={{ color: "#00ff94" }}>backtest</strong> rewinds time and pretends you traded using our signals over a past period. It shows how a strategy would have performed—handy for learning, but past results don’t guarantee future ones.
+    </p>
+    <p style={{ fontSize: 16, lineHeight: 1.55, color: "#aaa", marginBottom: 10, fontFamily: "var(--body)" }}>
+      <strong style={{ color: "#00ff94" }}>Buy & Hold</strong> — If you’d simply bought at the start and held until the end. A baseline to compare against.
+    </p>
+    <p style={{ fontSize: 16, lineHeight: 1.55, color: "#aaa", marginBottom: 10, fontFamily: "var(--body)" }}>
+      <strong style={{ color: "#00ff94" }}>Win rate</strong> — The share of trades that made money. 70% means 7 out of 10 trades were profitable.
+    </p>
+    <p style={{ fontSize: 16, lineHeight: 1.55, color: "#aaa", marginBottom: 10, fontFamily: "var(--body)" }}>
+      <strong style={{ color: "#00ff94" }}>Trades</strong> — How many times the strategy bought and sold in that period.
+    </p>
+    <p style={{ fontSize: 16, lineHeight: 1.55, color: "#aaa", marginBottom: 10, fontFamily: "var(--body)" }}>
+      <strong style={{ color: "#00ff94" }}>Max drawdown</strong> — The biggest peak‑to‑valley drop in your account. If it’s 15%, your equity once fell 15% from a high before recovering.
+    </p>
+    <p style={{ fontSize: 16, lineHeight: 1.55, color: "#aaa", marginBottom: 10, fontFamily: "var(--body)" }}>
+      <strong style={{ color: "#00ff94" }}>The graph</strong> — The line is your account equity over time. The Y‑axis (vertical) is dollar value: higher = more money. It grows when trades win and dips when they lose.
+    </p>
+    <p style={{ fontSize: 16, lineHeight: 1.55, color: "#aaa", marginBottom: 0, fontFamily: "var(--body)" }}>
+      <strong style={{ color: "#00ff94" }}>Entry</strong> — When we bought. <strong style={{ color: "#00ff94" }}>Exit</strong> — When we sold. <strong style={{ color: "#00ff94" }}>Return</strong> — Profit or loss for that trade (%). <strong style={{ color: "#00ff94" }}>Outcome</strong> — Win or loss.
+    </p>
+  </div>
+);
 
 export function BacktestTab({
   tickers,
@@ -27,6 +62,19 @@ export function BacktestTab({
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const infoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!infoOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (infoRef.current && !infoRef.current.contains(e.target as Node)) {
+        setInfoOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [infoOpen]);
 
   const runBacktest = async () => {
     setLoading(true);
@@ -49,10 +97,52 @@ export function BacktestTab({
   };
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
-      <div style={{ fontSize: 12, letterSpacing: "0.12em", color: "#555", fontFamily: "var(--mono)", marginBottom: 4 }}>BACKTEST</div>
-      <div style={{ fontSize: 11, color: "#666", fontFamily: "var(--mono)", marginBottom: 8 }}>
-        Historical simulation — not a guarantee. Uses same composite indicator logic as live signals.
+    <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16, position: "relative" }}>
+      <div ref={infoRef} style={{ position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 16, letterSpacing: "0.12em", color: "#555", fontFamily: "var(--mono)", marginBottom: 24 }}>BACKTEST</div>
+            <div style={{ fontSize: 11, color: "#666", fontFamily: "var(--mono)", marginBottom: 8 }}>
+              Historical simulation — not a guarantee. Uses same composite indicator logic as live signals.
+            </div>
+          </div>
+          <button
+            onClick={() => setInfoOpen((o) => !o)}
+            style={{
+              flexShrink: 0,
+              width: 24,
+              height: 24,
+              borderRadius: "50%",
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.04)",
+              color: "#666",
+              fontSize: 18,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+            title="What does the backtest show?"
+          >
+            ⓘ
+          </button>
+        </div>
+        {infoOpen && (
+          <div
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              zIndex: 20,
+              background: "#141414",
+              border: "1px solid rgba(255,255,255,0.12)",
+              borderRadius: 12,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+            }}
+          >
+            {backtestExplainer}
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
         <select value={ticker} onChange={(e) => setTicker(e.target.value)} style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 8, padding: "8px 12px", color: "#f0f0f0", fontFamily: "var(--mono)", fontSize: 12 }}>
@@ -90,9 +180,9 @@ export function BacktestTab({
             <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 16, height: 240 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={result.equity_curve}>
-                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#666" }} stroke="#333" />
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: "#666" }} stroke="#333" tickFormatter={formatMMDDYY} />
                   <YAxis tick={{ fontSize: 10, fill: "#666" }} stroke="#333" tickFormatter={(v) => `$${v}`} />
-                  <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }} labelStyle={{ color: "#00ff94" }} formatter={(v: number) => [`$${v.toFixed(0)}`, "Equity"]} />
+                  <Tooltip contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }} labelStyle={{ color: "#00ff94" }} labelFormatter={formatMMDDYY} formatter={(v: number) => [`$${v.toFixed(0)}`, "Equity"]} />
                   <Line type="monotone" dataKey="value" stroke="#00ff94" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
@@ -114,8 +204,8 @@ export function BacktestTab({
                   <tbody>
                     {result.trades.map((t, i) => (
                       <tr key={i} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
-                        <td style={{ padding: "6px 10px", color: "#ccc" }}>{t.entry_date}</td>
-                        <td style={{ padding: "6px 10px", color: "#ccc" }}>{t.exit_date}</td>
+                        <td style={{ padding: "6px 10px", color: "#ccc" }}>{formatMMDDYY(t.entry_date)}</td>
+                        <td style={{ padding: "6px 10px", color: "#ccc" }}>{formatMMDDYY(t.exit_date)}</td>
                         <td style={{ padding: "6px 10px", color: t.return_pct >= 0 ? "#00ff94" : "#ff4757" }}>{t.return_pct >= 0 ? "+" : ""}{t.return_pct.toFixed(2)}%</td>
                         <td style={{ padding: "6px 10px" }}>
                           <span style={{ padding: "2px 6px", borderRadius: 4, background: t.outcome === "win" ? "rgba(0,255,148,0.15)" : "rgba(255,71,87,0.15)", color: t.outcome === "win" ? "#00ff94" : "#ff4757", fontSize: 10 }}>{t.outcome}</span>
