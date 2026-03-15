@@ -3,6 +3,20 @@ import { API } from "../../config";
 import { signalColors } from "../../config";
 import type { ScannerResult, ScannerStatus } from "../../types";
 
+const TZ = "America/Los_Angeles";
+
+function formatLastScan(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    timeZone: TZ,
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
 type FilterPill = "ALL" | "STRONG BUY" | "BUY" | "UNUSUAL MOVE";
 
 function isUnusualMove(r: ScannerResult): boolean {
@@ -174,7 +188,7 @@ export function ScannerTab({
       {/* Header row */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 8 }}>
         <span style={{ fontSize: 15, color: "#666", fontFamily: "var(--mono)" }}>
-          {status?.lastScan ? `Last scanned: ${new Date(status.lastScan).toLocaleString()}` : "No scan yet"}
+          {status?.lastScan ? `Last scanned: ${formatLastScan(status.lastScan)}` : "No scan yet"}
         </span>
         <button
           onClick={runScan}

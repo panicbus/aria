@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 
 import { API, MEMORY_SECTIONS, RISK_OPTIONS, SIGNALS_OPTIONS } from "../../config";
-import type { Memory } from "../../types";
+import type { Memory, Dashboard } from "../../types";
 
 function memorySection(key: string): "portfolio" | "preferences" | "context" {
   if (key.startsWith("position_") || key === "positions" || key === "watchlist") return "portfolio";
@@ -17,12 +17,47 @@ function parseMemoryValue(value: string): unknown {
   }
 }
 
+type PositionParsed = {
+  ticker?: string;
+  amount?: number;
+  entry?: number;
+  quantity?: number;
+  average_cost?: number;
+};
+
+function formatPositionDisplay(
+  v: PositionParsed,
+  key: string,
+  currentPrice: number | null
+): string {
+  const ticker = (v.ticker ?? key.replace(/^position_/i, "") ?? "").toUpperCase().trim() || "—";
+  const qty = v.amount ?? v.quantity;
+  const entry = v.entry ?? v.average_cost;
+  const qtyStr = qty != null && !isNaN(Number(qty)) ? String(Number(qty)) : "?";
+  const entryStr =
+    entry != null && !isNaN(Number(entry))
+      ? `$${Number(entry) >= 1000 ? Number(entry).toLocaleString("en-US", { maximumFractionDigits: 0 }) : Number(entry).toFixed(2)}`
+      : "?";
+  let base = `${ticker}: ${qtyStr} @ ${entryStr}`;
+  if (currentPrice != null && !isNaN(currentPrice)) {
+    const priceStr = currentPrice >= 1000 ? currentPrice.toLocaleString("en-US", { maximumFractionDigits: 0 }) : currentPrice.toFixed(2);
+    base += ` · now $${priceStr}`;
+    if (entry != null && !isNaN(Number(entry)) && Number(entry) > 0) {
+      const pct = (((currentPrice - Number(entry)) / Number(entry)) * 100).toFixed(1);
+      base += ` (${Number(pct) >= 0 ? "+" : ""}${pct}%)`;
+    }
+  }
+  return base;
+}
+
 export function MemoryTab({
   memories,
+  dashboard,
   onRefresh,
   onDelete,
 }: {
   memories: Memory[];
+  dashboard?: Dashboard | null;
   onRefresh: () => void;
   onDelete: (key: string) => void;
 }) {
@@ -77,10 +112,10 @@ export function MemoryTab({
 
   const handleAddPosition = () => {
     const ticker = newPosition.ticker.trim().toUpperCase();
-    const amount = parseFloat(newPosition.amount);
-    const entry = parseFloat(newPosition.entry);
-    if (!ticker || isNaN(amount) || isNaN(entry)) return;
-    saveMemory(`position_${ticker}`, { ticker, amount, entry });
+    const quantity = parseFloat(newPosition.amount);
+    const average_cost = parseFloat(newPosition.entry);
+    if (!ticker || isNaN(quantity) || isNaN(average_cost)) return;
+    saveMemory(`position_${ticker}`, { ticker, quantity, average_cost });
   };
 
   const handleAddWatchlist = () => {
@@ -234,10 +269,13 @@ export function MemoryTab({
           <div style={{ fontSize: 10, letterSpacing: "0.1em", color: "#00ff94", fontFamily: "var(--mono)", marginBottom: 8 }}>PORTFOLIO</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {portfolioMemories.filter((m) => m.key.startsWith("position_")).map((m) => {
-              const v = parseMemoryValue(m.value) as { ticker?: string; amount?: number; entry?: number };
-              const disp = typeof v === "object" && v && "ticker" in v
-                ? `${v.ticker}: ${v.amount} @ $${v.entry?.toLocaleString()}`
-                : String(m.value);
+              const v = parseMemoryValue(m.value) as PositionParsed;
+              const ticker = (v?.ticker ?? m.key.replace(/^position_/i, "") ?? "").toUpperCase().trim() || "?";
+              const currentPrice = dashboard?.prices?.find((r) => r.symbol === ticker)?.price ?? null;
+              const disp =
+                typeof v === "object" && v && (v.ticker != null || v.amount != null || v.quantity != null || v.entry != null || v.average_cost != null)
+                  ? formatPositionDisplay(v, m.key, currentPrice)
+                  : String(m.value);
               return (
                 <div key={m.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.07)" }}>
                   <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "#ccc" }}>• {disp}</span>

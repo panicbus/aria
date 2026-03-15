@@ -24,6 +24,8 @@ import { createBriefingsRouter } from "./routes/briefings";
 import { createBacktestRouter } from "./routes/backtest";
 import { createChatRouter } from "./routes/chat";
 import { createScannerRouter } from "./routes/scanner";
+import { createPortfolioRouter } from "./routes/portfolio";
+import { fetchCryptoPortfolioSummary, logRobinhoodStatus } from "./services/robinhood";
 
 dotenv.config();
 
@@ -104,7 +106,7 @@ ACTION: [specific next step if applicable]`;
 
 // ── Live data (prices, news, signals) ──────────────────────────────────────────
 // Base tickers always fetched. Memory watchlist (Portfolio tab) adds more — no code change needed.
-const BASE_TICKERS = ["BTC", "AMD", "AMZN", "CLS"];
+const BASE_TICKERS = ["BTC", "ETH", "AMD", "AMZN", "CLS"];
 const CRYPTO_COINGECKO_IDS: Record<string, string> = { BTC: "bitcoin", ETH: "ethereum" };
 
 function getWatchedTickers(): string[] {
@@ -240,6 +242,22 @@ async function start() {
       category TEXT,
       scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS crypto_portfolio (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL UNIQUE,
+      quantity REAL NOT NULL,
+      cost_basis REAL NOT NULL,
+      average_buy_price REAL NOT NULL,
+      current_price REAL NOT NULL,
+      market_value REAL NOT NULL,
+      unrealized_pnl REAL NOT NULL,
+      unrealized_pnl_pct REAL NOT NULL,
+      buying_power REAL,
+      portfolio_value REAL,
+      source TEXT DEFAULT 'robinhood',
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   // Migrations: add new columns to existing tables (no-op if column exists)
@@ -279,11 +297,13 @@ async function start() {
 
   const liveData = createLiveDataFetchers({
     db,
+    execAll,
     saveDb,
     getWatchedTickers,
     cryptoIds: CRYPTO_COINGECKO_IDS,
     coingeckoIdToSymbol: COINGECKO_ID_TO_SYMBOL,
   });
+  const fetchCryptoPrices = liveData.fetchCryptoPrices;
   fetchCoinGecko = liveData.fetchCoinGecko;
   fetchStocks = liveData.fetchStocks;
   fetchHN = liveData.fetchHN;
@@ -306,7 +326,7 @@ async function start() {
     execAll,
     run,
     saveDb,
-    fetchCoinGecko,
+    fetchCoinGecko: fetchCryptoPrices,
     fetchStocks,
     fetchHN,
     generateSignals,
@@ -370,6 +390,48 @@ async function start() {
   // Start server immediately so the app is reachable. Run initial fetches in background.
   const hasKey = !!process.env.ANTHROPIC_API_KEY?.trim();
   console.log(`  Claude API key: ${hasKey ? "present" : "MISSING — add ANTHROPIC_API_KEY to .env"}`);
+  logRobinhoodStatus();
+
+  async function refreshCryptoPortfolio(): Promise<void> {
+    const summary = await fetchCryptoPortfolioSummary();
+    if (!summary) {
+      const existing = execAll<{ symbol: string }>("SELECT symbol FROM crypto_portfolio");
+      if (existing.length > 0) {
+        const now = new Date().toISOString();
+        db.run("UPDATE crypto_portfolio SET source = 'robinhood_stale', updated_at = :now", { ":now": now } as any);
+        saveDb();
+      }
+      return;
+    }
+    const now = new Date().toISOString();
+    const { account, holdings } = summary;
+    for (const h of holdings) {
+      db.run(
+        `INSERT OR REPLACE INTO crypto_portfolio (symbol, quantity, cost_basis, average_buy_price, current_price, market_value, unrealized_pnl, unrealized_pnl_pct, buying_power, portfolio_value, source, updated_at)
+         VALUES (:symbol, :quantity, :cost_basis, :avg, :current, :market_value, :pnl, :pnl_pct, :buying_power, :portfolio_value, 'robinhood', :now)`,
+        {
+          ":symbol": h.symbol,
+          ":quantity": h.quantity,
+          ":cost_basis": h.cost_basis,
+          ":avg": h.average_buy_price,
+          ":current": h.current_price,
+          ":market_value": h.market_value,
+          ":pnl": h.unrealized_pnl,
+          ":pnl_pct": h.unrealized_pnl_pct,
+          ":buying_power": account.buying_power,
+          ":portfolio_value": account.portfolio_value,
+          ":now": now,
+        } as any
+      );
+    }
+    saveDb();
+  }
+
+  app.use("/api/portfolio", createPortfolioRouter({
+    execAll,
+    refreshCryptoPortfolio,
+    anthropic,
+  }));
 
   app.listen(PORT, () => {
     console.log(`
@@ -382,15 +444,17 @@ async function start() {
 
   // Initial fetch + scheduled live data (runs in background after server is up)
   Promise.resolve().then(async () => {
-    await fetchCoinGecko();
+    await fetchCryptoPrices();
     await fetchStocks();
     await fetchHN();
+    await refreshCryptoPortfolio();
     await fetchAndStoreOHLCV();
     generateSignals();
   }).catch((err) => console.error("Initial fetch failed:", err));
 
-  setInterval(fetchCoinGecko, PRICE_INTERVAL_MS);
+  setInterval(fetchCryptoPrices, PRICE_INTERVAL_MS);
   setInterval(fetchStocks, PRICE_INTERVAL_MS);
+  setInterval(refreshCryptoPortfolio, PRICE_INTERVAL_MS);
   setInterval(fetchHN, NEWS_INTERVAL_MS);
   setInterval(generateSignals, SIGNAL_INTERVAL_MS);
 

@@ -1,13 +1,18 @@
 /**
- * Live data fetchers: CoinGecko (crypto), Finnhub (stocks), Hacker News.
- * Used by start() intervals and briefing generation.
+ * Live data fetchers: Robinhood (crypto primary), CoinGecko (crypto fallback), Finnhub (stocks), Hacker News.
+ * Phase 6a: BTC and ETH use Robinhood first, CoinGecko as silent fallback.
  */
+
+import { fetchCryptoPrice as fetchRobinhoodPrice } from "./robinhood";
 
 const HN_TOP = "https://hacker-news.firebaseio.com/v0/topstories.json";
 const HN_ITEM = (id: number) => `https://hacker-news.firebaseio.com/v0/item/${id}.json`;
 
+const CRYPTO_SYMBOLS = ["BTC", "ETH"] as const;
+
 export type LiveDataDeps = {
   db: import("sql.js").Database | null;
+  execAll: <T extends Record<string, unknown>>(sql: string) => T[];
   saveDb: () => void;
   getWatchedTickers: () => string[];
   cryptoIds: Record<string, string>;
@@ -15,7 +20,70 @@ export type LiveDataDeps = {
 };
 
 export function createLiveDataFetchers(deps: LiveDataDeps) {
-  const { db, saveDb, getWatchedTickers, cryptoIds, coingeckoIdToSymbol } = deps;
+  const { db, execAll, saveDb, getWatchedTickers, cryptoIds, coingeckoIdToSymbol } = deps;
+
+  async function fetchCoinGeckoPriceForSymbol(symbol: string): Promise<{ price: number; change_24h: number | null } | null> {
+    const id = cryptoIds[symbol];
+    if (!id) return null;
+    const url = `https://api.coingecko.com/api/v3/simple/price?ids=${id}&vs_currencies=usd&include_24hr_change=true`;
+    try {
+      const res = await fetch(url);
+      const data = (await res.json()) as Record<string, { usd: number; usd_24h_change?: number }>;
+      const v = data[id];
+      if (!v?.usd) return null;
+      return { price: v.usd, change_24h: v.usd_24h_change ?? null };
+    } catch (e) {
+      console.warn(`CoinGecko ${symbol} fetch error:`, e);
+      return null;
+    }
+  }
+
+  function getPrevPrice(symbol: string): { price: number; change_24h: number | null } | null {
+    if (!db) return null;
+    const safe = symbol.replace(/'/g, "''");
+    const rows = execAll<{ price: number; change_24h: number | null }>(
+      `SELECT price, change_24h FROM prices WHERE symbol = '${safe}' LIMIT 1`
+    );
+    const r = rows[0];
+    if (!r?.price) return null;
+    return { price: r.price, change_24h: r.change_24h };
+  }
+
+  async function fetchCryptoPrices(): Promise<void> {
+    if (!db) return;
+    const tickers = getWatchedTickers();
+    const crypto = tickers.filter((s) => CRYPTO_SYMBOLS.includes(s as any));
+    if (crypto.length === 0) return;
+
+    const now = new Date().toISOString();
+    for (const symbol of crypto) {
+      let price: number | null = null;
+      let change24h: number | null = null;
+      let source = "coingecko_fallback";
+
+      price = await fetchRobinhoodPrice(symbol);
+      if (price != null) {
+        source = "robinhood";
+        const prev = getPrevPrice(symbol);
+        change24h = prev?.price ? ((price - prev.price) / prev.price) * 100 : null;
+      } else {
+        console.warn(`Robinhood price unavailable for ${symbol}, falling back to CoinGecko`);
+        const fallback = await fetchCoinGeckoPriceForSymbol(symbol);
+        if (fallback) {
+          price = fallback.price;
+          change24h = fallback.change_24h;
+        }
+      }
+
+      if (price != null && !isNaN(price)) {
+        db.run(
+          "INSERT OR REPLACE INTO prices (symbol, price, change_24h, source, updated_at) VALUES (:symbol, :price, :change_24h, :source, :updated_at)",
+          { ":symbol": symbol, ":price": price, ":change_24h": change24h, ":source": source, ":updated_at": now } as any
+        );
+      }
+    }
+    saveDb();
+  }
 
   async function fetchCoinGecko(): Promise<void> {
     if (!db) return;
@@ -34,7 +102,7 @@ export function createLiveDataFetchers(deps: LiveDataDeps) {
         const change = v.usd_24h_change ?? null;
         db.run(
           "INSERT OR REPLACE INTO prices (symbol, price, change_24h, source, updated_at) VALUES (:symbol, :price, :change_24h, :source, :updated_at)",
-          { ":symbol": symbol, ":price": price, ":change_24h": change, ":source": "coingecko", ":updated_at": now }
+          { ":symbol": symbol, ":price": price, ":change_24h": change, ":source": "coingecko", ":updated_at": now } as any
         );
       }
       saveDb();
@@ -52,7 +120,7 @@ export function createLiveDataFetchers(deps: LiveDataDeps) {
     }
     const finnhubQuote = (symbol: string) =>
       `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${key}`;
-    const symbols = getWatchedTickers().filter((s) => s !== "BTC");
+    const symbols = getWatchedTickers().filter((s) => s !== "BTC" && s !== "ETH");
     const now = new Date().toISOString();
     for (const symbol of symbols) {
       try {
@@ -98,5 +166,5 @@ export function createLiveDataFetchers(deps: LiveDataDeps) {
     }
   }
 
-  return { fetchCoinGecko, fetchStocks, fetchHN };
+  return { fetchCoinGecko, fetchCryptoPrices, fetchStocks, fetchHN };
 }

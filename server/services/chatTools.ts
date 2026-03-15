@@ -88,6 +88,11 @@ export const TOOLS: any[] = [
     },
   },
   {
+    name: "get_portfolio",
+    description: "Get Nico's current crypto portfolio from Robinhood: positions (BTC, ETH), quantity, cost basis, average buy price, current price, unrealized P&L, buying power. Use when Nico asks about his positions, how much he's up or down, or buying power.",
+    input_schema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "scan_market",
     description: "Get ARIA's current top picks from the scanner. Use when Nico asks things like 'anything interesting in the market today?' or 'what should I be looking at beyond my portfolio?'. Returns signal, score, RSI, and ARIA's reasoning per ticker.",
     input_schema: { type: "object", properties: {}, additionalProperties: false },
@@ -209,6 +214,24 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
           const msg = e instanceof Error ? e.message : String(e);
           return { error: `Web search failed: ${msg}` };
         }
+      }
+      case "get_portfolio": {
+        const rows = execAll<{
+          symbol: string;
+          quantity: number;
+          cost_basis: number;
+          average_buy_price: number;
+          current_price: number;
+          market_value: number;
+          unrealized_pnl: number;
+          unrealized_pnl_pct: number;
+          buying_power: number | null;
+          source: string;
+        }>("SELECT symbol, quantity, cost_basis, average_buy_price, current_price, market_value, unrealized_pnl, unrealized_pnl_pct, buying_power, source FROM crypto_portfolio ORDER BY symbol");
+        if (!rows.length) {
+          return { message: "No portfolio data. Add Robinhood API credentials to .env to see live crypto positions.", holdings: [] };
+        }
+        return { holdings: rows, data_source: rows[0]?.source ?? "robinhood" };
       }
       case "scan_market": {
         const picks = getScannerTopPicks?.(0) ?? [];

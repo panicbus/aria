@@ -109,6 +109,21 @@ export type ScannerStatus = {
   universeSize: number;
 };
 
+export type CryptoPortfolioHolding = {
+  symbol: string;
+  quantity: number;
+  cost_basis: number;
+  average_buy_price: number;
+  current_price: number;
+  market_value: number;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number;
+  buying_power?: number | null;
+  portfolio_value?: number | null;
+  source: string;
+  updated_at: string;
+};
+
 export type BacktestResult = {
   ticker: string;
   days: number;

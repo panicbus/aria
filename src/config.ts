@@ -19,6 +19,7 @@ export const SUGGESTED_PROMPTS = [
 ];
 
 export const FALLBACK_TICKERS = ["BTC", "AMD", "AMZN", "CLS"];
+export const ROBINHOOD_CRYPTO_SYMBOLS = ["BTC-USD", "ETH-USD"] as const;
 
 export const DASHBOARD_POLL_MS = 60 * 1000; // 1 min
 

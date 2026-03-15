@@ -108,6 +108,7 @@ export function createBriefingGenerators(deps: BriefingDeps) {
 ${worthWatchingSection}
 Include:
 - Market summary for watched tickers (BTC, UBER, SPY, LTBR, GDX, GOLD)
+- When Nico has real crypto positions (from Robinhood in the live data): include his actual P&L, buying power, and one sentence on whether either position warrants attention today
 - Top signals with plain-English reasoning (not just BUY/SELL labels — explain why, reference RSI/MACD/MAs when available)
 - For each signal recommendation: suggested position size %, stop-loss level %, and a one-sentence plain-English risk statement (e.g. "Risk 5% of portfolio, cut losses at -3%")
 - Notable tech news from HN
@@ -180,7 +181,7 @@ Use the web search results below. Pick 2–4 tickers that could move up (analyst
 From the web search: earnings, Fed, economic data, or other events that could move markets. What's coming up and why it matters. Be specific (dates, names).
 
 ## 3. Your portfolio snapshot
-From Nico's positions and watchlist in memory: quick take on each holding. Reference our signals and risk context. Any alerts or suggested tweaks. Keep it tight.
+From Nico's positions, watchlist in memory, and real Robinhood crypto data (if present): quick take on each holding. Include end-of-day portfolio snapshot with how positions moved. Reference our signals and risk context. Any alerts or suggested tweaks. Keep it tight.
 
 ## 4. Tech & AI pulse
 From the web search: notable moves in tech/AI that could affect Nico's work or investments. He's a frontend dev in the Bay Area; surface what's relevant.

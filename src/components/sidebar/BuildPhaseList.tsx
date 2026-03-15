@@ -5,6 +5,8 @@ const PHASES = [
   { label: "2 — The Eyes", done: true },
   { label: "3 — The Brain", done: true },
   { label: "4 — The Edge", done: true },
+  { label: "5 — The Scanner", done: true },
+  { label: "6a — Real Portfolio: Crypto", done: true },
 ];
 
 export function BuildPhaseList() {

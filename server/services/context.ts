@@ -25,9 +25,34 @@ export function createBuildLiveContext(deps: ContextDeps): () => string {
     const signals = execAll<{ ticker: string; signal: string; reasoning: string | null }>(
       "SELECT ticker, signal, reasoning FROM signals ORDER BY created_at DESC LIMIT 10"
     );
+    const portfolio = execAll<{
+      symbol: string;
+      quantity: number;
+      cost_basis: number;
+      average_buy_price: number;
+      current_price: number;
+      market_value: number;
+      unrealized_pnl: number;
+      unrealized_pnl_pct: number;
+      buying_power: number | null;
+      source: string;
+    }>("SELECT symbol, quantity, cost_basis, average_buy_price, current_price, market_value, unrealized_pnl, unrealized_pnl_pct, buying_power, source FROM crypto_portfolio ORDER BY symbol");
 
     const tz = process.env.TZ || "America/Los_Angeles";
     const asOf = new Date().toLocaleString("en-US", { timeZone: tz });
+
+    const portfolioBlock =
+      portfolio.length > 0 && !portfolio.every((p) => p.source === "robinhood_stale")
+        ? `
+CRYPTO PORTFOLIO (Robinhood):
+${portfolio
+  .map(
+    (p) =>
+      `${p.symbol}: ${p.quantity} @ avg $${p.average_buy_price} | now $${p.current_price} | P&L $${p.unrealized_pnl} (${p.unrealized_pnl_pct.toFixed(1)}%) | value $${p.market_value}`
+  )
+  .join("\n")}
+Buying Power: $${portfolio[0]?.buying_power ?? 0}`
+        : "";
 
     return `
 
@@ -42,6 +67,7 @@ ${prices
       })`
   )
   .join("\n")}
+${portfolioBlock}
 
 LATEST SIGNALS:
 ${signals.map((s) => `${s.ticker}: ${s.signal} — ${s.reasoning ?? ""}`).join("\n")}

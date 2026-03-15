@@ -16,6 +16,7 @@ const formatDateShort = (iso: string) =>
 export function BriefingTab() {
   const [briefings, setBriefings] = useState<Briefing[]>([]);
   const [briefingError, setBriefingError] = useState<string | null>(null);
+  const [briefingGenerating, setBriefingGenerating] = useState(false);
   const [briefingTypeTab, setBriefingTypeTab] = useState<"morning" | "evening">("morning");
   const [selectedBriefingId, setSelectedBriefingId] = useState<number | null>(null);
   const [briefingArchiveOffset, setBriefingArchiveOffset] = useState(0);
@@ -33,6 +34,34 @@ export function BriefingTab() {
     const t = setInterval(loadBriefings, DASHBOARD_POLL_MS);
     return () => clearInterval(t);
   }, []);
+
+  const generateNow = async () => {
+    if (briefingGenerating) return;
+    setBriefingGenerating(true);
+    setBriefingError(null);
+    const endpoint = briefingTypeTab === "morning" ? `${API}/briefings/generate` : `${API}/briefings/generate-evening`;
+    try {
+      const res = await fetch(endpoint, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setBriefingError((data?.error ?? "Request failed") + (data?.detail ? `: ${data.detail}` : ""));
+        return;
+      }
+      const generated = data as Briefing & { email_sent?: boolean };
+      if (generated?.id) {
+        setBriefings((prev) => [generated, ...prev.filter((b) => b.id !== generated.id)].slice(0, 30));
+        setBriefingTypeTab(generated.type ?? briefingTypeTab);
+        setSelectedBriefingId(generated.id);
+        if (generated.email_sent) setBriefingError(null);
+      } else {
+        setBriefingError(briefingTypeTab === "morning" ? "Briefing generated but invalid response." : "Evening briefing failed.");
+      }
+    } catch (e) {
+      setBriefingError(e instanceof Error ? e.message : "Network error. Is the server running?");
+    } finally {
+      setBriefingGenerating(false);
+    }
+  };
 
   useEffect(() => {
     if (briefings.length > 0 && !hasSetBriefingTabRef.current) {
@@ -70,7 +99,7 @@ export function BriefingTab() {
           {briefingError}
         </div>
       )}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 4 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
         {(["morning", "evening"] as const).map((tab) => (
           <button
             key={tab}
@@ -92,6 +121,22 @@ export function BriefingTab() {
             {tab === "morning" ? "Morning" : "Evening"}
           </button>
         ))}
+        <button
+          onClick={generateNow}
+          disabled={briefingGenerating}
+          style={{
+            fontSize: 12,
+            fontFamily: "var(--mono)",
+            padding: "5px 14px",
+            borderRadius: 14,
+            border: "1px solid rgba(0,255,148,0.4)",
+            background: briefingGenerating ? "rgba(0,255,148,0.1)" : "transparent",
+            color: "#00ff94",
+            cursor: briefingGenerating ? "wait" : "pointer",
+          }}
+        >
+          {briefingGenerating ? "Generating…" : "Generate now"}
+        </button>
       </div>
       <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "16px 18px" }}>
         {displayBriefing ? (

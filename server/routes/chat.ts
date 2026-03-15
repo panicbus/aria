@@ -63,7 +63,7 @@ export function createChatRouter(deps: ChatDeps): Router {
       let currentMessages: any[] = [...baseMessages];
       let finalResponse: any = await anthropic.messages.create({
         model: "claude-sonnet-4-5",
-        max_tokens: 1000,
+        max_tokens: 4096,
         system: fullSystemPrompt,
         tools,
         tool_choice: { type: "auto" },
@@ -86,7 +86,7 @@ export function createChatRouter(deps: ChatDeps): Router {
         ];
         finalResponse = await anthropic.messages.create({
           model: "claude-sonnet-4-5",
-          max_tokens: 1000,
+          max_tokens: 4096,
           system: fullSystemPrompt,
           tools,
           tool_choice: { type: "auto" },
