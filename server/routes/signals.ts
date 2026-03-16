@@ -19,11 +19,12 @@ type DbContext = {
   run: (sql: string, params?: Record<string, string | number | null>) => { lastInsertRowid: number };
   saveDb: () => void;
   getRiskContextForTicker: (ticker: string, signal?: string, indicatorData?: { score?: number } | null) => RiskContext;
+  generateSignals?: () => void;
 };
 
 export function createSignalsRouter(ctx: DbContext): Router {
   const router = Router();
-  const { execAll, run, saveDb, getRiskContextForTicker } = ctx;
+  const { execAll, run, saveDb, getRiskContextForTicker, generateSignals } = ctx;
 
   router.post("/", (req: Request, res: Response) => {
     const { ticker, signal, reasoning, price } = req.body;
@@ -58,6 +59,14 @@ export function createSignalsRouter(ctx: DbContext): Router {
       };
     });
     res.json(signals);
+  });
+
+  router.post("/generate", (_req: Request, res: Response) => {
+    if (!generateSignals) {
+      return res.status(501).json({ error: "Signal generation not configured" });
+    }
+    generateSignals();
+    res.json({ ok: true, message: "Signals generated from watched tickers" });
   });
 
   return router;

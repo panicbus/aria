@@ -109,30 +109,49 @@ ACTION: [specific next step if applicable]`;
 const BASE_TICKERS = ["BTC", "ETH", "AMD", "AMZN", "CLS"];
 const CRYPTO_COINGECKO_IDS: Record<string, string> = { BTC: "bitcoin", ETH: "ethereum" };
 
+// WAYPOINT [getWatchedTickers]
+// WHAT: Merges BASE_TICKERS with tickers from memory (watchlist_core, watchlist_speculative, position_*).
+// WHY: Signals, OHLCV, and live data must reflect Nico's current holdings + watchlist — not a hardcoded list.
+// HOW IT HELPS NICO: Add BOTZ via chat → next signal cycle generates a signal. Exit LTBR → position removed → signals stop.
 function getWatchedTickers(): string[] {
   if (!db) return [...BASE_TICKERS];
-  const combined = [...BASE_TICKERS];
+  const tickers = new Set<string>(BASE_TICKERS);
 
-  // Watchlist (comma-separated)
+  // Read watchlist_core from memories table
+  const coreRow = execAll<{ value: string }>("SELECT value FROM memories WHERE key = 'watchlist_core' LIMIT 1");
+  if (coreRow.length && coreRow[0].value) {
+    try {
+      const core = JSON.parse(coreRow[0].value);
+      if (Array.isArray(core)) core.forEach((t: string) => tickers.add(String(t).toUpperCase()));
+    } catch (_) {}
+  }
+
+  // Read watchlist_speculative from memories table
+  const specRow = execAll<{ value: string }>("SELECT value FROM memories WHERE key = 'watchlist_speculative' LIMIT 1");
+  if (specRow.length && specRow[0].value) {
+    try {
+      const spec = JSON.parse(specRow[0].value);
+      if (Array.isArray(spec)) spec.forEach((t: string) => tickers.add(String(t).toUpperCase()));
+    } catch (_) {}
+  }
+
+  // Fallback: legacy watchlist (comma-separated) for backward compatibility with Memory tab
   const watchRow = execAll<{ value: string }>("SELECT value FROM memories WHERE key = 'watchlist' LIMIT 1");
   const watchRaw = watchRow[0]?.value?.trim();
   if (watchRaw) {
-    const fromWatch = watchRaw.split(/[\s,]+/).map((s) => s.toUpperCase()).filter((s) => s.length > 0);
-    for (const t of fromWatch) {
-      if (!combined.includes(t)) combined.push(t);
-    }
+    watchRaw.split(/[\s,]+/).map((s) => s.toUpperCase()).filter((s) => s.length > 0).forEach((t) => tickers.add(t));
   }
 
-  // Position tickers (from position_XXX memories) — auto-include so holdings charts work
-  const positions = execAll<{ value: string }>("SELECT value FROM memories WHERE key LIKE 'position_%'");
-  for (const p of positions) {
+  // Read all position_* keys from memories table
+  const posRows = execAll<{ key: string; value: string }>("SELECT key, value FROM memories WHERE key LIKE 'position_%'");
+  for (const row of posRows) {
     try {
-      const parsed = JSON.parse(p.value) as { ticker?: string };
-      const t = (parsed.ticker ?? "").toUpperCase().trim();
-      if (t.length > 0 && !combined.includes(t)) combined.push(t);
+      const pos = JSON.parse(row.value) as { ticker?: string };
+      if (pos?.ticker) tickers.add(String(pos.ticker).toUpperCase());
     } catch (_) {}
   }
-  return combined;
+
+  return Array.from(tickers);
 }
 const PRICE_INTERVAL_MS = 5 * 60 * 1000; // 5 min
 const NEWS_INTERVAL_MS = 15 * 60 * 1000; // 15 min
@@ -292,8 +311,8 @@ async function start() {
   const buildMemoryContext = createBuildMemoryContext({ execAll });
   const getRiskContextForTicker = createGetRiskContextForTicker({ execAll });
 
-  const generateSignals = createGenerateSignals({ db, execAll, run, saveDb });
-  const generateSignalForTicker = createGenerateSignalForTicker({ db, execAll, run, saveDb });
+  const generateSignals = createGenerateSignals({ db, execAll, run, saveDb, getWatchedTickers });
+  const generateSignalForTicker = createGenerateSignalForTicker({ db, execAll, run, saveDb, getWatchedTickers });
 
   const liveData = createLiveDataFetchers({
     db,
@@ -355,7 +374,7 @@ async function start() {
 
   app.use("/api", createHealthRouter(anthropic));
   app.use("/api", createDashboardRouter({ execAll, getWatchedTickers, getRiskContextForTicker }));
-  app.use("/api/signals", createSignalsRouter({ execAll, run, saveDb, getRiskContextForTicker }));
+  app.use("/api/signals", createSignalsRouter({ execAll, run, saveDb, getRiskContextForTicker, generateSignals }));
   app.use("/api/briefings", createBriefingsRouter({ db, execAll, saveDb, generateBriefing, generateEveningBriefing, sendBriefingEmail }));
   app.use("/api/backtest", createBacktestRouter({ getWatchedTickers, runBacktest }));
   app.use("/api", createChatRouter({

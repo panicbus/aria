@@ -12,20 +12,25 @@ type SignalDeps = {
   execAll: <T extends Record<string, unknown>>(sql: string) => T[];
   run: (sql: string, params?: Record<string, string | number | null>) => { lastInsertRowid: number };
   saveDb: () => void;
+  getWatchedTickers: () => string[];
 };
 
 export function createGenerateSignals(deps: SignalDeps): () => void {
-  const { db, execAll, run, saveDb } = deps;
+  const { db, execAll, run, saveDb, getWatchedTickers } = deps;
 
   return function generateSignals(): void {
     if (!db) return;
+    const tickers = getWatchedTickers();
     const priceRows = execAll<PriceRow>("SELECT symbol, price, change_24h, source FROM prices ORDER BY updated_at DESC");
     const bySymbol = new Map<string, PriceRow>();
     for (const r of priceRows) {
       if (!bySymbol.has(r.symbol)) bySymbol.set(r.symbol, r);
     }
 
-    for (const [symbol, r] of bySymbol) {
+    let inserted = 0;
+    for (const symbol of tickers) {
+      const r = bySymbol.get(symbol);
+      if (!r) continue;
       const price = Number(r.price);
       const ohlcvRows = execAll<{ close: number }>(
         `SELECT close FROM ohlcv WHERE symbol = '${symbol}' ORDER BY date ASC`
@@ -72,8 +77,9 @@ export function createGenerateSignals(deps: SignalDeps): () => void {
           ":indicator_data": indicatorDataJson,
         }
       );
+      inserted++;
     }
-    if (bySymbol.size) saveDb();
+    if (inserted) saveDb();
   };
 }
 
