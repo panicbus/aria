@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 
 import { API, MEMORY_SECTIONS, RISK_OPTIONS, SIGNALS_OPTIONS } from "../../config";
+
+const TZ = "America/Los_Angeles";
+const formatTs = (iso: string) =>
+  new Date(iso).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 import type { Memory, Dashboard } from "../../types";
 
 function memorySection(key: string): "portfolio" | "preferences" | "context" {
@@ -383,7 +387,7 @@ export function MemoryTab({
                     </div>
                   </div>
                   <div style={{ fontSize: 12, color: "#ccc", fontFamily: "var(--body)", marginTop: 6, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{m.value}</div>
-                  <div style={{ fontSize: 10, color: "#555", fontFamily: "var(--mono)", marginTop: 4 }}>updated {m.updated_at ? new Date(m.updated_at).toLocaleString() : ""}</div>
+                  <div style={{ fontSize: 10, color: "#555", fontFamily: "var(--mono)", marginTop: 4 }}>updated {m.updated_at ? formatTs(m.updated_at) : ""}</div>
                 </div>
               ))
             )}

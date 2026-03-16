@@ -57,7 +57,7 @@ export function createBriefingsRouter(ctx: DbContext): Router {
       if (!briefing) {
         return res.status(500).json({ error: "Failed to generate evening briefing" });
       }
-      const sent = await sendBriefingEmail(briefing.content, `ARIA Evening Briefing — ${new Date().toLocaleDateString()}`);
+      const sent = await sendBriefingEmail(briefing.content, `ARIA Evening Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}`);
       res.json({ ...briefing, email_sent: sent });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);

@@ -6,12 +6,10 @@ import type { BacktestResult } from "../../types";
 
 const BACKTEST_DAYS = [30, 60, 90, 180] as const;
 
+const TZ = "America/Los_Angeles";
 function formatMMDDYY(isoOrStr: string): string {
   const d = new Date(isoOrStr);
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const y = String(d.getFullYear()).slice(-2);
-  return `${m}/${day}/${y}`;
+  return d.toLocaleDateString("en-US", { timeZone: TZ, month: "2-digit", day: "2-digit", year: "2-digit" });
 }
 
 const backtestExplainer = (

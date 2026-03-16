@@ -485,7 +485,7 @@ async function start() {
     try {
       const briefing = await generateEveningBriefing();
       if (briefing?.content) {
-        const sent = await sendBriefingEmail(briefing.content, `ARIA Evening Briefing — ${new Date().toLocaleDateString()}`);
+        const sent = await sendBriefingEmail(briefing.content, `ARIA Evening Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}`);
         if (sent) console.log("Evening briefing sent by email");
         else console.log("Evening briefing stored (email not configured)");
       }

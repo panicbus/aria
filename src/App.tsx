@@ -17,6 +17,12 @@ import { BuildPhaseList } from "./components/sidebar/BuildPhaseList";
 import { API, SUGGESTED_PROMPTS, FALLBACK_TICKERS, DASHBOARD_POLL_MS, signalColors } from "./config";
 import type { Message, Signal, Dashboard, Memory } from "./types";
 
+const TZ = "America/Los_Angeles";
+const formatTs = (iso: string) =>
+  new Date(iso).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const formatTimeLA = (iso?: string) =>
+  (iso ? new Date(iso) : new Date()).toLocaleTimeString("en-US", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
+
 export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -78,10 +84,10 @@ export default function App() {
           setMessages([{
             role: "assistant",
             content: "ARIA online. I'm your personal intelligence layer — tech industry, financial signals, and developer growth. What do you need?",
-            ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            ts: formatTimeLA(),
           }]);
         } else {
-          setMessages(data.map(m => ({ ...m, ts: new Date(m.created_at!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })));
+          setMessages(data.map(m => ({ ...m, ts: formatTimeLA(m.created_at!) })));
         }
       });
   }, []);
@@ -135,7 +141,7 @@ export default function App() {
     const userText = text || input.trim();
     if (!userText || loading) return;
 
-    const userMsg: Message = { role: "user", content: userText, ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) };
+    const userMsg: Message = { role: "user", content: userText, ts: formatTimeLA() };
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setLoading(true);
@@ -154,7 +160,7 @@ export default function App() {
       }
       setMessages(prev => [...prev, {
         role: "assistant", content: data.reply ?? "",
-        ts: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        ts: formatTimeLA(),
       }]);
     } catch (e) {
       setMessages(prev => [...prev, { role: "assistant", content: "Server unreachable. Make sure `npm run dev` is running.", ts: "" }]);
@@ -334,7 +340,7 @@ export default function App() {
                               {rc.warning && <span style={{ color: "#ffd32a", marginLeft: 8 }}>⚠ {rc.warning}</span>}
                             </div>
                           )}
-                          <div style={{ fontSize: 11, color: "#555", fontFamily: "var(--mono)" }}>${Number(s.price).toLocaleString()} · {s.created_at ? new Date(s.created_at).toLocaleString() : ""}</div>
+                          <div style={{ fontSize: 11, color: "#555", fontFamily: "var(--mono)" }}>${Number(s.price).toLocaleString()} · {s.created_at ? formatTs(s.created_at) : ""}</div>
                         </div>
                       );
                     })}
