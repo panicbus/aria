@@ -30,8 +30,8 @@ flyctl volumes create aria_data --size 1 --region sjc
 ### 2. Set secrets
 
 ```bash
-# Required for chat and briefings
-flyctl secrets set ANTHROPIC_API_KEY=sk-ant-your-key
+# Required for chat and briefings (free at https://aistudio.google.com/app/apikey)
+flyctl secrets set GEMINI_API_KEY=your_key
 
 # Optional — add as needed
 flyctl secrets set ALPHAVANTAGE_API_KEY=your-key    # OHLCV data
@@ -57,7 +57,7 @@ flyctl open
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API for chat, briefings, memory |
+| `GEMINI_API_KEY` | Yes | Gemini 2.0 Flash for chat, briefings, memory (free tier) |
 | `ALPHAVANTAGE_API_KEY` | No | OHLCV historical data (25 req/day free) |
 | `FINNHUB_API_KEY` | No | Live stock prices |
 | `TAVILY_API_KEY` | No | Web search in chat |

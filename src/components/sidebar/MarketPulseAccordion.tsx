@@ -29,9 +29,11 @@ const SECTION_LABEL_STYLE: React.CSSProperties = {
 export function MarketPulseAccordion({
   open,
   onToggle,
+  refreshTrigger = 0,
 }: {
   open: boolean;
   onToggle: () => void;
+  refreshTrigger?: number;
 }) {
   const [data, setData] = useState<MarketPulseItem[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +67,7 @@ export function MarketPulseAccordion({
     fetchData();
     const t = setInterval(fetchData, DASHBOARD_POLL_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [refreshTrigger]);
 
   const items = data ?? [];
   const marketContext = items.filter((i) => i.category === "market_context");

@@ -5,7 +5,8 @@
  */
 
 import { Router, Request, Response } from "express";
-import type Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GEMINI_TOOLS } from "../services/chatTools";
 
 type ChatDeps = {
   db: import("sql.js").Database;
@@ -14,8 +15,6 @@ type ChatDeps = {
   buildLiveContext: () => string;
   buildMemoryContext: () => string;
   systemPrompt: string;
-  anthropic: Anthropic;
-  tools: any[];
   handleToolCall: (name: string, input: any) => Promise<any>;
   runMemoryExtraction: (userContent: string, assistantContent: string) => Promise<void>;
 };
@@ -29,8 +28,6 @@ export function createChatRouter(deps: ChatDeps): Router {
     buildLiveContext,
     buildMemoryContext,
     systemPrompt,
-    anthropic,
-    tools,
     handleToolCall,
     runMemoryExtraction,
   } = deps;
@@ -56,52 +53,50 @@ export function createChatRouter(deps: ChatDeps): Router {
     const fullSystemPrompt = systemPrompt + memoryContext + liveContext;
 
     try {
-      const baseMessages = history.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+      const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+      const model = genAI.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        systemInstruction: fullSystemPrompt,
+        generationConfig: { maxOutputTokens: useQuickMode ? 512 : 4096 },
+        ...(useQuickMode ? {} : { tools: GEMINI_TOOLS }),
+      });
 
-      let currentMessages: any[] = [...baseMessages];
-      const toolChoice = useQuickMode ? { type: "none" as const } : { type: "auto" as const };
-      let finalResponse: any = await anthropic.messages.create({
-        model: "claude-sonnet-4-5",
-        max_tokens: useQuickMode ? 512 : 4096,
-        system: fullSystemPrompt,
-        tools,
-        tool_choice: toolChoice,
-        messages: currentMessages,
-      } as any);
+      let geminiHistory = history.slice(0, -1).map((m) => ({
+        role: m.role === "assistant" ? ("model" as const) : ("user" as const),
+        parts: [{ text: m.content }],
+      }));
+      // Gemini requires first content to be from user — strip any leading model messages
+      while (geminiHistory.length > 0 && geminiHistory[0].role === "model") {
+        geminiHistory = geminiHistory.slice(1);
+      }
+      const lastMessage = history[history.length - 1]?.content ?? message;
+
+      const chat = model.startChat({ history: geminiHistory });
+      let result = await chat.sendMessage(lastMessage);
 
       while (true) {
-        const toolUses = (finalResponse.content as any[]).filter((c: any) => c.type === "tool_use");
-        if (toolUses.length === 0) break;
+        const response = result.response;
+        const functionCalls = response.functionCalls?.();
+        if (!functionCalls || functionCalls.length === 0) break;
 
-        const toolUsesTyped = toolUses as Array<{ id: string; name: string; input: any }>;
-        const results = await Promise.all(
-          toolUsesTyped.map((tu) => handleToolCall(tu.name, tu.input).then((result) => ({ id: tu.id, content: JSON.stringify(result) })))
-        );
-        const toolResultBlocks: Array<{ type: "tool_result"; tool_use_id: string; content: string }> = results.map((r) => ({
-          type: "tool_result",
-          tool_use_id: r.id,
-          content: r.content,
-        }));
-        currentMessages = [
-          ...currentMessages,
-          { role: "assistant", content: finalResponse.content },
-          { role: "user", content: toolResultBlocks },
-        ];
-        finalResponse = await anthropic.messages.create({
-          model: "claude-sonnet-4-5",
-          max_tokens: 4096,
-          system: fullSystemPrompt,
-          tools,
-          tool_choice: { type: "auto" },
-          messages: currentMessages,
-        } as any);
+        const toolResults = [];
+        for (const call of functionCalls) {
+          const toolResult = await handleToolCall(call.name, call.args ?? {});
+          // Gemini requires response to be an object, not an array — wrap arrays/primitives
+          const responseObj = typeof toolResult === "object" && toolResult !== null && !Array.isArray(toolResult)
+            ? toolResult
+            : { result: toolResult };
+          toolResults.push({
+            functionResponse: {
+              name: call.name,
+              response: responseObj,
+            },
+          });
+        }
+        result = await chat.sendMessage(toolResults);
       }
 
-      const textBlock = (finalResponse.content as any[]).find((c: any) => c.type === "text") as { text: string } | undefined;
-      const reply = textBlock?.text ?? "";
+      const reply = (result.response as { text?: () => string }).text?.() ?? "";
 
       db.run("INSERT INTO messages (role, content) VALUES (:role, :content)", {
         ":role": "assistant",
@@ -114,8 +109,8 @@ export function createChatRouter(deps: ChatDeps): Router {
       res.json({ reply });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      console.error("Claude API error:", msg);
-      res.status(500).json({ error: "Claude API error", detail: msg });
+      console.error("Gemini API error:", msg);
+      res.status(500).json({ error: "Gemini API error", detail: msg });
     }
   });
 

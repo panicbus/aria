@@ -2,7 +2,7 @@
 
 ## What We Deployed
 
-**ARIA** (Autonomous Research & Intelligence Assistant) is now hosted on **Fly.io** for 24/7 operation. It's a Node.js backend + React frontend app that uses Claude for chat, briefings, and memory, with SQLite (sql.js) for persistence.
+**ARIA** (Autonomous Research & Intelligence Assistant) is now hosted on **Fly.io** for 24/7 operation. It's a Node.js backend + React frontend app that uses Google Gemini 2.0 Flash for chat, briefings, and memory, with SQLite (sql.js) for persistence.
 
 - **App name:** `aria-nico`
 - **URL:** https://aria-nico.fly.dev
@@ -24,7 +24,7 @@
 
 | Secret | Required | Purpose |
 |--------|----------|---------|
-| `ANTHROPIC_API_KEY` | Yes | Claude API for chat, briefings, memory |
+| `GEMINI_API_KEY` | Yes | Gemini 2.0 Flash for chat, briefings, memory (free tier) |
 | `ALPHAVANTAGE_API_KEY` | No | OHLCV historical data |
 | `FINNHUB_API_KEY` | No | Stock prices |
 | `TAVILY_API_KEY` | No | Web search in chat |

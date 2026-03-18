@@ -5,8 +5,10 @@ import type { ScannerResult, ScannerStatus } from "../../types";
 
 const TZ = "America/Los_Angeles";
 
+// Server timestamps (SQLite CURRENT_TIMESTAMP) are UTC without "Z"; treat as UTC so display is correct
 function formatLastScan(iso: string): string {
-  return new Date(iso).toLocaleString("en-US", {
+  const normalized = iso && !/Z|[+-]\d{2}:?\d{2}$/.test(iso) ? iso.replace(" ", "T") + "Z" : iso;
+  return new Date(normalized).toLocaleString("en-US", {
     timeZone: TZ,
     month: "short",
     day: "numeric",
@@ -49,7 +51,34 @@ export function ScannerTab({
   const [error, setError] = useState<string | null>(null);
   const [addingTicker, setAddingTicker] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [companyNames, setCompanyNames] = useState<Record<string, string>>({});
   const infoRef = useRef<HTMLDivElement>(null);
+
+  // Fetch company names for symbols in results (any ticker, from Finnhub via backend)
+  const fetchedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const symbols = [...new Set(results.map((r) => r.symbol))];
+    const toFetch = symbols.filter((s) => !fetchedRef.current.has(s));
+    if (toFetch.length === 0) return;
+    toFetch.forEach((s) => fetchedRef.current.add(s));
+    let cancelled = false;
+    Promise.all(
+      toFetch.map((symbol) =>
+        fetch(`${API}/scanner/company/${encodeURIComponent(symbol)}`)
+          .then((r) => r.json())
+          .then((data: { name?: string }) => ({ symbol, name: data?.name ?? symbol }))
+          .catch(() => ({ symbol, name: symbol }))
+      )
+    ).then((pairs) => {
+      if (cancelled) return;
+      setCompanyNames((prev) => {
+        const next = { ...prev };
+        for (const { symbol, name } of pairs) next[symbol] = name;
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [results]);
 
   useEffect(() => {
     if (!infoOpen) return;
@@ -115,7 +144,8 @@ export function ScannerTab({
     }
   };
 
-  const topPicks = results.filter((r) => r.aria_reasoning != null && r.aria_reasoning.trim() !== "");
+  // Always show top 10 by score as full cards (ARIA reasoning first when present, then by score)
+  const topPicks = results.slice(0, 10);
   const allFiltered = filterResults(results, filter);
   const apiLimitReached = status != null && status.apiCallsRemaining <= 0;
 
@@ -317,35 +347,36 @@ export function ScannerTab({
                   padding: "14px 16px",
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontFamily: "var(--display)", fontWeight: 700, color: "#f0f0f0" }}>{r.symbol}</span>
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontFamily: "var(--mono)",
-                        padding: "2px 6px",
-                        borderRadius: 4,
-                        background: "rgba(0,255,148,0.12)",
-                        color: "#00ff94",
-                      }}
-                    >
-                      {(r.category ?? "large_cap").replace("_", " ").toUpperCase()}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 15,
-                        fontFamily: "var(--mono)",
-                        padding: "2px 8px",
-                        borderRadius: 20,
-                        background: `${(signalColors[r.signal] ?? "#888")}18`,
-                        border: `1px solid ${(signalColors[r.signal] ?? "#888")}40`,
-                        color: signalColors[r.signal] ?? "#888",
-                      }}
-                    >
-                      {r.signal}
-                    </span>
-                  </div>
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontFamily: "var(--display)", fontWeight: 700, color: "#f0f0f0" }}>{r.symbol}</span>
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontFamily: "var(--mono)",
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          background: "rgba(0,255,148,0.12)",
+                          color: "#00ff94",
+                        }}
+                      >
+                        {(r.category ?? "large_cap").replace("_", " ").toUpperCase()}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 15,
+                          fontFamily: "var(--mono)",
+                          padding: "2px 8px",
+                          borderRadius: 20,
+                          background: `${(signalColors[r.signal] ?? "#888")}18`,
+                          border: `1px solid ${(signalColors[r.signal] ?? "#888")}40`,
+                          color: signalColors[r.signal] ?? "#888",
+                        }}
+                      >
+                        {r.signal}
+                      </span>
+                    </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                     <span style={{ fontSize: 16, fontFamily: "var(--mono)", color: "#ccc" }}>
                       ${Number(r.price).toLocaleString()}
@@ -356,6 +387,8 @@ export function ScannerTab({
                       )}
                     </span>
                   </div>
+                  </div>
+                  <div style={{ fontSize: 14, color: "rgba(255,255,255,0.8)", fontFamily: "var(--body)", marginTop: 4 }}>{companyNames[r.symbol] ?? r.symbol}</div>
                 </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 8, fontSize: 15, fontFamily: "var(--mono)" }}>
                   <span style={{ color: "#00ff94" }}>
@@ -382,7 +415,7 @@ export function ScannerTab({
                   />
                 </div>
                 <div style={{ fontSize: 16, color: "#aaa", lineHeight: 1.5, marginBottom: 12, fontFamily: "var(--body)" }}>
-                  {r.aria_reasoning}
+                  {r.aria_reasoning?.trim() || "Technical indicators only — no ARIA summary for this scan."}
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button

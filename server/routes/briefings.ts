@@ -45,7 +45,7 @@ export function createBriefingsRouter(ctx: DbContext): Router {
       console.error("Briefing generation error:", message);
       const hint =
         message.toLowerCase().includes("connection") || message.toLowerCase().includes("econnrefused")
-          ? " — Check your network, firewall, or proxy. If behind a VPN/corporate proxy, it may be blocking api.anthropic.com."
+          ? " — Check your network, firewall, or proxy. If behind a VPN/corporate proxy, it may be blocking the Gemini API."
           : "";
       res.status(500).json({ error: "Briefing generation error", detail: message + hint });
     }

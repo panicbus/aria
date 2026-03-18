@@ -4,6 +4,7 @@
 // HOW IT HELPS NICO: "Worth watching" candidates outside his portfolio, ranked by technicals and ARIA reasoning.
 
 import { computeIndicatorsForCloses, scoreToSignal } from "./indicators";
+import { generateText } from "./gemini";
 import { fetchOHLCVForTicker } from "./ohlcv";
 
 // ── Universe by risk tolerance ─────────────────────────────────────────────────
@@ -35,7 +36,6 @@ type ScannerDeps = {
   run: (sql: string, params?: Record<string, string | number | null | undefined>) => { lastInsertRowid: number };
   saveDb: () => void;
   getWatchedTickers: () => string[];
-  anthropic: import("@anthropic-ai/sdk").default;
   cryptoIds?: Record<string, string>;
 };
 
@@ -84,7 +84,7 @@ async function fetchPriceFromFinnhub(symbol: string): Promise<{ price: number; c
 export type ScannerUniverseEntry = { symbol: string; category: "large_cap" | "growth" | "small_cap" };
 
 export function createScannerService(deps: ScannerDeps) {
-  const { db, execAll, run, saveDb, getWatchedTickers, anthropic, cryptoIds } = deps;
+  const { db, execAll, run, saveDb, getWatchedTickers, cryptoIds } = deps;
 
   function getRiskTolerance(): "conservative" | "moderate" | "aggressive" {
     const rows = execAll<{ value: string }>("SELECT value FROM memories WHERE key = 'risk_tolerance' LIMIT 1");
@@ -270,7 +270,7 @@ export function createScannerService(deps: ScannerDeps) {
     }>("SELECT id, symbol, signal, score, rsi, macd_histogram, price, change_24h, category FROM scanner_results ORDER BY score DESC");
 
     if (rows.length === 0) return;
-    if (!process.env.ANTHROPIC_API_KEY?.trim()) return;
+    if (!process.env.GEMINI_API_KEY?.trim()) return;
 
     const summary = rows
       .map(
@@ -292,16 +292,10 @@ Return ONLY a valid JSON array of objects with this exact shape:
 No other text.`;
 
     try {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-5",
-        max_tokens: 800,
-        system: "You are ARIA. Return only valid JSON. No markdown, no explanation.",
-        messages: [{ role: "user", content: `${prompt}\n\n---\n${summary}` }],
-      });
-
-      const textBlock = response.content.find((c: unknown) => (c as { type?: string }).type === "text") as { text: string } | undefined;
-      const text = (textBlock?.text ?? "").trim();
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      const systemInstruction = "You are ARIA. Return only valid JSON. No markdown, no explanation.";
+      const response = await generateText(`${prompt}\n\n---\n${summary}`, systemInstruction);
+      const clean = response.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const jsonMatch = clean.match(/\[[\s\S]*\]/);
       const arr = jsonMatch ? (JSON.parse(jsonMatch[0]) as Array<{ symbol: string; aria_reasoning: string }>) : [];
 
       const bySymbol = new Map(arr.map((a) => [a.symbol.toUpperCase(), a.aria_reasoning ?? ""]));

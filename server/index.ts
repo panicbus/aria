@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import Anthropic from "@anthropic-ai/sdk";
 import initSqlJs from "sql.js";
 import path from "path";
 import fs from "fs";
@@ -14,7 +13,7 @@ import { createGenerateSignals, createGenerateSignalForTicker } from "./services
 import { createBuildLiveContext, createBuildMemoryContext, createGetRiskContextForTicker } from "./services/context";
 import { createBriefingGenerators, sendBriefingEmail } from "./services/briefings";
 import { createScannerService } from "./services/scanner";
-import { TOOLS, createHandleToolCall, createRunMemoryExtraction } from "./services/chatTools";
+import { createHandleToolCall, createRunMemoryExtraction } from "./services/chatTools";
 import { createMemoriesRouter } from "./routes/memories";
 import { createHealthRouter } from "./routes/health";
 import { createOhlcvRouter } from "./routes/ohlcv";
@@ -89,9 +88,6 @@ function run(sql: string, params?: DbParams): { lastInsertRowid: number } {
   const id = rows.length && rows[0].values[0] ? (rows[0].values[0][0] as number) : 0;
   return { lastInsertRowid: id };
 }
-
-// ── Anthropic ──────────────────────────────────────────────────────────────────
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are ARIA — Autonomous Research & Intelligence Assistant — a personal intelligence layer built for Nico, a senior frontend developer in the Bay Area with 12 years of tech experience.
 
@@ -360,13 +356,11 @@ async function start() {
     run,
     saveDb,
     getWatchedTickers,
-    anthropic,
     cryptoIds: CRYPTO_COINGECKO_IDS,
   });
 
   const { generateBriefing, generateEveningBriefing } = createBriefingGenerators({
     db,
-    anthropic,
     execAll,
     run,
     saveDb,
@@ -388,7 +382,7 @@ async function start() {
     generateSignalForTicker,
     getScannerTopPicks: (min) => scannerService.getTopPicks(min ?? 0),
   });
-  const runMemoryExtraction = createRunMemoryExtraction({ anthropic, handleToolCall });
+  const runMemoryExtraction = createRunMemoryExtraction({ handleToolCall });
 
   fetchAndStoreOHLCV = createFetchAndStoreOHLCV({
     getWatchedTickers,
@@ -397,7 +391,7 @@ async function start() {
     cryptoIds: CRYPTO_COINGECKO_IDS,
   });
 
-  app.use("/api", createHealthRouter(anthropic));
+  app.use("/api", createHealthRouter());
   app.use("/api", createDashboardRouter({ execAll, getWatchedTickers, getRiskContextForTicker }));
   app.use("/api/signals", createSignalsRouter({ execAll, run, saveDb, getRiskContextForTicker, generateSignals }));
   app.use("/api/briefings", createBriefingsRouter({ db, execAll, saveDb, generateBriefing, generateEveningBriefing, sendBriefingEmail }));
@@ -409,8 +403,6 @@ async function start() {
     buildLiveContext,
     buildMemoryContext,
     systemPrompt: SYSTEM_PROMPT,
-    anthropic,
-    tools: TOOLS,
     handleToolCall,
     runMemoryExtraction,
   }));
@@ -432,8 +424,12 @@ async function start() {
   }));
 
   // Start server immediately so the app is reachable. Run initial fetches in background.
-  const hasKey = !!process.env.ANTHROPIC_API_KEY?.trim();
-  console.log(`  Claude API key: ${hasKey ? "present" : "MISSING — add ANTHROPIC_API_KEY to .env"}`);
+  const hasKey = !!process.env.GEMINI_API_KEY?.trim();
+  if (!hasKey) {
+    console.warn("  GEMINI_API_KEY not set — AI features disabled. Get a free key at aistudio.google.com");
+  } else {
+    console.log("  Gemini API key: present");
+  }
   logRobinhoodStatus();
 
   async function refreshCryptoPortfolio(): Promise<void> {
@@ -474,7 +470,6 @@ async function start() {
   app.use("/api/portfolio", createPortfolioRouter({
     execAll,
     refreshCryptoPortfolio,
-    anthropic,
   }));
 
   // Serve built frontend in production (cwd for Docker, __dirname for dev)

@@ -5,7 +5,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import type Anthropic from "@anthropic-ai/sdk";
+import { generateText } from "../services/gemini";
 
 type CryptoPortfolioRow = {
   symbol: string;
@@ -25,7 +25,6 @@ type CryptoPortfolioRow = {
 type PortfolioDeps = {
   execAll: <T extends Record<string, unknown>>(sql: string) => T[];
   refreshCryptoPortfolio: () => Promise<void>;
-  anthropic: Anthropic;
 };
 
 let ariaTakeCache: { btc: string; eth: string } | null = null;
@@ -34,7 +33,7 @@ const ARIA_TAKE_CACHE_MS = 15 * 60 * 1000;
 
 export function createPortfolioRouter(deps: PortfolioDeps): Router {
   const router = Router();
-  const { execAll, refreshCryptoPortfolio, anthropic } = deps;
+  const { execAll, refreshCryptoPortfolio } = deps;
 
   router.get("/crypto", (req: Request, res: Response) => {
     const rows = execAll<CryptoPortfolioRow>(
@@ -109,14 +108,9 @@ Respond with JSON only: { "btc": "2-3 sentences for BTC", "eth": "2-3 sentences 
 If he doesn't own an asset, use "" for that key.`;
 
     try {
-      const response = await anthropic.messages.create({
-        model: "claude-sonnet-4-5",
-        max_tokens: 500,
-        messages: [{ role: "user", content: prompt }],
-      });
-      const textBlock = (response.content as any[]).find((c: any) => c.type === "text");
-      const text = textBlock?.text ?? "{}";
-      const json = JSON.parse(text.replace(/```json?\s*|\s*```/g, "").trim() || "{}");
+      const response = await generateText(prompt);
+      const clean = response.replace(/```json?\s*|\s*```/g, "").trim() || "{}";
+      const json = JSON.parse(clean);
       ariaTakeCache = { btc: json.btc ?? "", eth: json.eth ?? "" };
       ariaTakeCacheAt = now;
       res.json(ariaTakeCache);

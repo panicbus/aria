@@ -122,13 +122,14 @@ export function HoldingsAccordion({
               const ticker = (pos.ticker ?? tickerFromKey ?? "").toUpperCase().trim() || "—";
               const p = dashboard?.prices?.find((r) => r.symbol === ticker);
               return (
-                <HoldingsCard
-                  key={m.key}
-                  memoryKey={m.key}
-                  pos={pos}
-                  currentPrice={p?.price ?? null}
-                  apiBase={API}
-                />
+                <div key={m.key}>
+                  <HoldingsCard
+                    memoryKey={m.key}
+                    pos={pos}
+                    currentPrice={p?.price ?? null}
+                    apiBase={API}
+                  />
+                </div>
               );
             })}
           {!hasCrypto && positions.length === 0 && (

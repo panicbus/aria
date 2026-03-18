@@ -18,8 +18,11 @@ import { API, SUGGESTED_PROMPTS, FALLBACK_TICKERS, DASHBOARD_POLL_MS, signalColo
 import type { Message, Signal, Dashboard, Memory } from "./types";
 
 const TZ = "America/Los_Angeles";
-const formatTs = (iso: string) =>
-  new Date(iso).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+// Server timestamps (SQLite CURRENT_TIMESTAMP) are UTC without "Z"; treat as UTC so display is correct
+const formatTs = (iso: string) => {
+  const normalized = iso && !/Z|[+-]\d{2}:?\d{2}$/.test(iso) ? iso.replace(" ", "T") + "Z" : iso;
+  return new Date(normalized).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+};
 const formatTimeLA = (iso?: string) =>
   (iso ? new Date(iso) : new Date()).toLocaleTimeString("en-US", { timeZone: TZ, hour: "2-digit", minute: "2-digit" });
 
@@ -58,6 +61,7 @@ export default function App() {
   const [holdingsOpen, setHoldingsOpen] = useState(false);
   const [ohlcvRefreshAll, setOhlcvRefreshAll] = useState(false);
   const [marketPulseOpen, setMarketPulseOpen] = useState(true);
+  const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [backtestPreselectedTicker, setBacktestPreselectedTicker] = useState<string | null>(null);
   const [quickMode, setQuickMode] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -138,6 +142,13 @@ export default function App() {
     }
   }, [messages, loading, activeTab]);
 
+  const clearChat = async () => {
+    try {
+      await fetch(`${API}/history`, { method: "DELETE" });
+      setMessages([]);
+    } catch (_) {}
+  };
+
   const sendMessage = async (text?: string) => {
     const userText = text || input.trim();
     if (!userText || loading) return;
@@ -163,6 +174,9 @@ export default function App() {
         role: "assistant", content: data.reply ?? "",
         ts: formatTimeLA(),
       }]);
+      // Refresh sidebar (holdings, watchlist) — ARIA may have added/removed via tools
+      loadMemories();
+      setSidebarRefreshTrigger((t) => t + 1);
     } catch (e) {
       setMessages(prev => [...prev, { role: "assistant", content: "Server unreachable. Make sure `npm run dev` is running.", ts: "" }]);
     }
@@ -261,6 +275,7 @@ export default function App() {
             <MarketPulseAccordion
               open={marketPulseOpen}
               onToggle={() => setMarketPulseOpen((o) => !o)}
+              refreshTrigger={sidebarRefreshTrigger}
             />
             <TechNewsList news={dashboard?.news ?? []} />
             <BuildPhaseList />
@@ -382,12 +397,23 @@ export default function App() {
 
             {/* Input */}
             <div style={{ padding: "14px 24px", borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-              <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap" }}>
-                {SUGGESTED_PROMPTS.map((p, i) => (
-                  <button key={i} className="chip" onClick={() => setInput(p.text)} style={{ fontSize: 11, padding: "4px 11px", borderRadius: 20, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#777", cursor: "pointer", fontFamily: "var(--mono)", transition: "all 0.15s" }}>
-                    {p.label}
+              <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                  {SUGGESTED_PROMPTS.map((p, i) => (
+                    <button key={i} className="chip" onClick={() => setInput(p.text)} style={{ fontSize: 11, padding: "4px 11px", borderRadius: 20, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#777", cursor: "pointer", fontFamily: "var(--mono)", transition: "all 0.15s" }}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+                {messages.length > 0 && (
+                  <button
+                    onClick={clearChat}
+                    title="Clear chat window (keeps ARIA's memory — positions, watchlist, preferences)"
+                    style={{ fontSize: 11, padding: "4px 11px", borderRadius: 20, background: "transparent", border: "1px solid rgba(255,255,255,0.08)", color: "#555", cursor: "pointer", fontFamily: "var(--mono)", transition: "all 0.15s" }}
+                  >
+                    Clear chat
                   </button>
-                ))}
+                )}
               </div>
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <button

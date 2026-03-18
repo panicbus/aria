@@ -2,21 +2,13 @@
  * Chat tool definitions and handlers; memory extraction after assistant replies.
  */
 
+import { SchemaType } from "@google/generative-ai";
+import { generateText } from "./gemini";
+
 type PriceRow = { symbol: string; price: number; change_24h: number | null; source: string; updated_at: string };
 type NewsRow = { id: number; title: string; url: string | null; source: string; created_at: string };
 type MemoryRow = { id: number; key: string; value: string; confidence: number; source: string | null; updated_at: string; created_at: string | null };
 type RiskContext = { suggested_position_size_pct: number; stop_loss_pct: number; take_profit_pct: number; risk_reward_ratio: number; confidence: string; warning?: string };
-
-const REMEMBER_TOOL = {
-  name: "remember",
-  description: "Persist a fact about Nico (portfolio, preferences, risk tolerance, goals). Key e.g. risk_tolerance, watchlist. Value string or JSON. confidence 0-1, source 'explicit' or 'inferred'.",
-  input_schema: {
-    type: "object",
-    properties: { key: { type: "string" }, value: { type: "string" }, confidence: { type: "number" }, source: { type: "string", enum: ["explicit", "inferred"] } },
-    required: ["key", "value"],
-    additionalProperties: false,
-  },
-};
 
 export const TOOLS: any[] = [
   {
@@ -135,6 +127,39 @@ export const TOOLS: any[] = [
       required: ["ticker", "list"],
       additionalProperties: false,
     },
+  },
+  {
+    name: "remove_position",
+    description: "Remove a stock/equity position from Nico's holdings. Use when Nico says he sold, closed, or wants to remove a position (e.g. 'remove AMD from my holdings', 'I sold my AMD', 'close my AMD position').",
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Ticker symbol to remove (e.g. AMD, SPY)" },
+      },
+      required: ["ticker"],
+      additionalProperties: false,
+    },
+  },
+];
+
+// Gemini function declarations for tool calling
+export const GEMINI_TOOLS: any[] = [
+  {
+    functionDeclarations: [
+      { name: "get_prices", description: "Fetch the latest prices for tracked tickers from the local database." },
+      { name: "get_signals", description: "Fetch the most recent BUY/SELL/HOLD/WATCH signals.", parameters: { type: SchemaType.OBJECT, properties: { limit: { type: SchemaType.INTEGER } }, required: [] } },
+      { name: "get_news", description: "Fetch the latest Hacker News headlines.", parameters: { type: SchemaType.OBJECT, properties: { limit: { type: SchemaType.INTEGER } }, required: [] } },
+      { name: "generate_signal", description: "Run signal logic for a specific ticker.", parameters: { type: SchemaType.OBJECT, properties: { ticker: { type: SchemaType.STRING } }, required: ["ticker"] } },
+      { name: "remember", description: "Persist a fact about Nico (portfolio, preferences, risk tolerance).", parameters: { type: SchemaType.OBJECT, properties: { key: { type: SchemaType.STRING }, value: { type: SchemaType.STRING }, confidence: { type: SchemaType.NUMBER }, source: { type: SchemaType.STRING } }, required: ["key", "value"] } },
+      { name: "recall", description: "Retrieve all stored memories about Nico." },
+      { name: "get_risk_context", description: "Get risk framing for a ticker.", parameters: { type: SchemaType.OBJECT, properties: { ticker: { type: SchemaType.STRING } }, required: ["ticker"] } },
+      { name: "get_portfolio", description: "Get Nico's crypto portfolio from Robinhood." },
+      { name: "scan_market", description: "Get ARIA's top picks from the scanner." },
+      { name: "web_search", description: "Search the web for current information.", parameters: { type: SchemaType.OBJECT, properties: { query: { type: SchemaType.STRING }, max_results: { type: SchemaType.INTEGER } }, required: ["query"] } },
+      { name: "add_to_watchlist", description: "Add a ticker to Nico's watchlist.", parameters: { type: SchemaType.OBJECT, properties: { ticker: { type: SchemaType.STRING }, list: { type: SchemaType.STRING } }, required: ["ticker", "list"] } },
+      { name: "remove_from_watchlist", description: "Remove a ticker from Nico's watchlist.", parameters: { type: SchemaType.OBJECT, properties: { ticker: { type: SchemaType.STRING }, list: { type: SchemaType.STRING } }, required: ["ticker", "list"] } },
+      { name: "remove_position", description: "Remove a stock position from Nico's holdings. Use when Nico says he sold, closed, or wants to remove a position.", parameters: { type: SchemaType.OBJECT, properties: { ticker: { type: SchemaType.STRING } }, required: ["ticker"] } },
+    ],
   },
 ];
 
@@ -330,6 +355,15 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
         saveDb();
         return { status: "ok", message: `Removed ${ticker} from watchlist`, watchlist: filtered };
       }
+      case "remove_position": {
+        const ticker = String(input?.ticker ?? "").trim().toUpperCase();
+        if (!ticker) return { error: "ticker is required" };
+        const key = `position_${ticker}`;
+        const existed = execAll<{ key: string }>(`SELECT key FROM memories WHERE key = '${key.replace(/'/g, "''")}' LIMIT 1`);
+        db.run("DELETE FROM memories WHERE key = :key", { ":key": key });
+        saveDb();
+        return { status: "ok", message: existed.length ? `Removed ${ticker} from holdings` : `${ticker} was not in holdings`, removed: existed.length > 0 };
+      }
       default:
         return { error: `Unknown tool '${name}'` };
     }
@@ -337,13 +371,12 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
 }
 
 export function createRunMemoryExtraction(deps: {
-  anthropic: import("@anthropic-ai/sdk").default;
   handleToolCall: (name: string, input: any) => Promise<any>;
 }): (userContent: string, assistantContent: string) => Promise<void> {
-  const { anthropic, handleToolCall } = deps;
+  const { handleToolCall } = deps;
 
   return async function runMemoryExtraction(userContent: string, assistantContent: string): Promise<void> {
-    if (!process.env.ANTHROPIC_API_KEY?.trim()) return;
+    if (!process.env.GEMINI_API_KEY?.trim()) return;
     const prompt = `You are extracting facts from a conversation to update ARIA's memory. Follow these rules strictly:
 
 WATCHLIST RULES (most important):
@@ -368,18 +401,20 @@ SAFE TO EXTRACT:
 
 WHEN IN DOUBT: Do nothing. It is always better to not extract than to overwrite correct data with partial data.
 
-For each valid fact call remember with key, value, confidence 0-1, and source "explicit" or "inferred". If nothing qualifies, do not call tools.`;
+For each valid fact call remember with key, value, confidence 0-1, and source "explicit" or "inferred". If nothing qualifies, do not call tools.
+
+Respond with a JSON array of remember calls, e.g. [{"key":"risk_tolerance","value":"moderate","confidence":1,"source":"explicit"}]. If nothing to extract, respond with [].`;
     try {
-      const r = await anthropic.messages.create({
-        model: "claude-sonnet-4-5",
-        max_tokens: 500,
-        tools: [REMEMBER_TOOL],
-        tool_choice: { type: "auto" },
-        messages: [{ role: "user", content: `${prompt}\n\n---\nUser: ${userContent}\n\nAssistant: ${assistantContent}` }],
-      } as any);
-      const toolUses = (r.content as any[]).filter((c: any) => c.type === "tool_use");
-      for (const tu of toolUses as Array<{ name: string; input: any }>) {
-        if (tu.name === "remember") await handleToolCall("remember", tu.input);
+      const systemInstruction = "You extract facts from conversations. Return ONLY a JSON array of remember calls. No other text.";
+      const fullPrompt = `${prompt}\n\n---\nUser: ${userContent}\n\nAssistant: ${assistantContent}`;
+      const response = await generateText(fullPrompt, systemInstruction);
+      const clean = response.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+      const match = clean.match(/\[[\s\S]*\]/);
+      const arr = match ? (JSON.parse(match[0]) as Array<{ key: string; value: string; confidence?: number; source?: string }>) : [];
+      for (const item of arr) {
+        if (!item?.key || item?.value == null) continue;
+        const value = typeof item.value === "object" ? JSON.stringify(item.value) : String(item.value);
+        await handleToolCall("remember", { key: item.key, value, confidence: item.confidence ?? 1, source: item.source ?? "inferred" });
       }
     } catch (e) {
       console.warn("Memory extraction failed:", e);

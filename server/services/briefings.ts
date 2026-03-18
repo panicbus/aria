@@ -1,8 +1,9 @@
 /**
- * Morning and evening briefings: fetch data, call Claude, store, optionally email.
+ * Morning and evening briefings: fetch data, call Gemini, store, optionally email.
  */
 
 import nodemailer from "nodemailer";
+import { generateText } from "./gemini";
 
 type BriefingRow = { id: number; content: string; created_at: string; type: "morning" | "evening" };
 
@@ -54,7 +55,6 @@ export { sendBriefingEmail };
 
 type BriefingDeps = {
   db: import("sql.js").Database | null;
-  anthropic: import("@anthropic-ai/sdk").default;
   execAll: <T extends Record<string, unknown>>(sql: string) => T[];
   run: (sql: string, params?: Record<string, string | number | null>) => { lastInsertRowid: number };
   saveDb: () => void;
@@ -70,7 +70,6 @@ type BriefingDeps = {
 export function createBriefingGenerators(deps: BriefingDeps) {
   const {
     db,
-    anthropic,
     execAll,
     run,
     saveDb,
@@ -85,8 +84,8 @@ export function createBriefingGenerators(deps: BriefingDeps) {
 
   async function generateBriefing(): Promise<BriefingRow | null> {
     if (!db) return null;
-    if (!process.env.ANTHROPIC_API_KEY?.trim()) {
-      throw new Error("ANTHROPIC_API_KEY is not set in .env");
+    if (!process.env.GEMINI_API_KEY?.trim()) {
+      throw new Error("GEMINI_API_KEY is not set in .env");
     }
 
     await fetchCoinGecko();
@@ -123,16 +122,8 @@ ${liveContext}
 ${memoryContext}
 `;
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 800,
-      system:
-        "You are ARIA writing a sharp, no-fluff morning briefing for Nico. Be direct, structured, and concrete. Use short sections and bullets.",
-      messages: [{ role: "user", content: userPrompt }],
-    });
-
-    const textBlock = response.content.find((c: any) => c.type === "text") as { text: string } | undefined;
-    const content = textBlock?.text?.trim();
+    const systemInstruction = "You are ARIA writing a sharp, no-fluff morning briefing for Nico. Be direct, structured, and concrete. Use short sections and bullets.";
+    const content = (await generateText(userPrompt, systemInstruction)).trim();
     if (!content) return null;
 
     const created_at = new Date().toISOString();
@@ -151,7 +142,7 @@ ${memoryContext}
 
   async function generateEveningBriefing(): Promise<BriefingRow | null> {
     if (!db) return null;
-    if (!process.env.ANTHROPIC_API_KEY?.trim()) return null;
+    if (!process.env.GEMINI_API_KEY?.trim()) return null;
 
     await fetchCoinGecko();
     await fetchStocks();
@@ -201,16 +192,8 @@ ${liveContext}
 ${memoryContext}
 `;
 
-    const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 1200,
-      system:
-        "You are ARIA writing a sharp evening briefing for Nico. Four sections. Direct, concrete, no fluff. Use short bullets.",
-      messages: [{ role: "user", content: userPrompt }],
-    });
-
-    const textBlock = response.content.find((c: any) => c.type === "text") as { text: string } | undefined;
-    const content = textBlock?.text?.trim();
+    const systemInstruction = "You are ARIA writing a sharp evening briefing for Nico. Four sections. Direct, concrete, no fluff. Use short bullets.";
+    const content = (await generateText(userPrompt, systemInstruction)).trim();
     if (!content) return null;
 
     const created_at = new Date().toISOString();
