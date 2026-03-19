@@ -1,11 +1,13 @@
 /**
  * WAYPOINT: Gemini Client
- * WHAT: Initializes the Google Gemini 2.0 Flash client
- * WHY: Single source of truth for AI client — swap models here without touching other services
+ * WHAT: Initializes the Google Gemini client (model configurable via GEMINI_MODEL)
+ * WHY: Single source of truth for AI client — swap models via .env without code changes
  * HOW IT HELPS NICO: Free AI tier keeps ARIA running at zero ongoing cost
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
+
+export const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
 
 if (!process.env.GEMINI_API_KEY?.trim()) {
   console.warn("WARNING: GEMINI_API_KEY not set. AI features will not work.");
@@ -14,7 +16,7 @@ if (!process.env.GEMINI_API_KEY?.trim()) {
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
 
 export const geminiModel = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash",
+  model: GEMINI_MODEL,
   generationConfig: { maxOutputTokens: 4096 },
 });
 
@@ -25,7 +27,7 @@ export async function generateText(prompt: string, systemInstruction?: string): 
   try {
     const model = systemInstruction
       ? genAI.getGenerativeModel({
-          model: "gemini-2.5-flash",
+          model: GEMINI_MODEL,
           systemInstruction,
           generationConfig: { maxOutputTokens: 4096 },
         })
@@ -48,7 +50,7 @@ export async function generateChatResponse(
 ): Promise<string> {
   try {
     const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
+      model: GEMINI_MODEL,
       systemInstruction,
       generationConfig: { maxOutputTokens: 4096 },
     });

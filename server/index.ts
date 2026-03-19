@@ -1,6 +1,6 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import initSqlJs from "sql.js";
 import path from "path";
 import fs from "fs";
@@ -25,8 +25,6 @@ import { createChatRouter } from "./routes/chat";
 import { createScannerRouter } from "./routes/scanner";
 import { createPortfolioRouter } from "./routes/portfolio";
 import { fetchCryptoPortfolioSummary, logRobinhoodStatus } from "./services/robinhood";
-
-dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -442,7 +440,8 @@ async function start() {
   if (!hasKey) {
     console.warn("  GEMINI_API_KEY not set — AI features disabled. Get a free key at aistudio.google.com");
   } else {
-    console.log("  Gemini API key: present");
+    const model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+    console.log(`  Gemini API key: present (model: ${model})`);
   }
   logRobinhoodStatus();
 

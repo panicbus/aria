@@ -13,8 +13,9 @@ import { ChatMessage } from "./components/chat/ChatMessage";
 import { HoldingsAccordion } from "./components/sidebar/HoldingsAccordion";
 import { MarketPulseAccordion } from "./components/sidebar/MarketPulseAccordion";
 import { TechNewsTab } from "./components/tabs/TechNewsTab";
+import { SignalsTab } from "./components/tabs/SignalsTab";
 import { BuildPhaseList } from "./components/sidebar/BuildPhaseList";
-import { API, SUGGESTED_PROMPTS, FALLBACK_TICKERS, DASHBOARD_POLL_MS, signalColors } from "./config";
+import { API, SUGGESTED_PROMPTS, FALLBACK_TICKERS, DASHBOARD_POLL_MS } from "./config";
 import type { Message, Signal, Dashboard, Memory } from "./types";
 
 const TZ = "America/Los_Angeles";
@@ -343,48 +344,7 @@ export default function App() {
                 }}
               />
             ) : activeTab === "signals" ? (
-              <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-                <div style={{ fontSize: 16, letterSpacing: "0.12em", color: "#555", fontFamily: "var(--mono)", marginBottom: 14 }}>LIVE SIGNALS</div>
-                {signals.length === 0 ? (
-                  <div style={{ color: "#555", fontSize: 13, fontFamily: "var(--mono)" }}>No signals yet. Prices refresh every 5m; signals use technical composite (RSI/MACD/MAs) or 24h fallback.</div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {signals.map((s) => {
-                      const ind = s.indicator_data;
-                      const rc = s.risk_context;
-                      const rsiColor = ind?.rsi != null ? (ind.rsi > 70 ? "#ff4757" : ind.rsi < 30 ? "#00ff94" : "#ffd32a") : "#888";
-                      const macdDir = ind?.macd ? (ind.macd.histogram > 0 ? "bullish" : "bearish") : null;
-                      const maPos = ind?.ma20 != null && ind?.ma50 != null && s.price
-                        ? (s.price > ind.ma20 && s.price > ind.ma50 ? "above both" : s.price > ind.ma20 ? "above 20 only" : s.price < ind.ma20 && s.price < ind.ma50 ? "below both" : "below 20 only")
-                        : null;
-                      return (
-                        <div key={s.id} style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: "14px 16px" }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
-                            <span style={{ fontFamily: "var(--display)", fontWeight: 700, color: "#f0f0f0" }}>{s.ticker}</span>
-                            <span style={{ fontSize: 11, fontFamily: "var(--mono)", padding: "2px 8px", borderRadius: 20, background: `${(signalColors[s.signal] ?? "#888")}18`, border: `1px solid ${(signalColors[s.signal] ?? "#888")}40`, color: signalColors[s.signal] ?? "#888" }}>{s.signal}</span>
-                          </div>
-                          <div style={{ fontSize: 12, color: "#888", fontFamily: "var(--body)", marginBottom: 6 }}>{s.reasoning}</div>
-                          {ind && (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 6, fontSize: 11, fontFamily: "var(--mono)" }}>
-                              {ind.rsi != null && <span style={{ color: rsiColor }}>RSI {ind.rsi.toFixed(0)} {ind.rsi > 70 ? "(overbought)" : ind.rsi < 30 ? "(oversold)" : "(neutral)"}</span>}
-                              {macdDir && <span style={{ color: macdDir === "bullish" ? "#00ff94" : "#ff4757" }}>MACD {macdDir}</span>}
-                              {maPos && <span style={{ color: "#888" }}>MA {maPos}</span>}
-                              {ind.score != null && <span style={{ color: "#00ff94" }}>Score {ind.score > 0 ? "+" : ""}{ind.score}/6</span>}
-                            </div>
-                          )}
-                          {rc && (
-                            <div style={{ fontSize: 11, color: "#666", fontFamily: "var(--mono)", marginBottom: 4 }}>
-                              Risk: {rc.suggested_position_size_pct}% size · stop {rc.stop_loss_pct}% · take-profit {rc.take_profit_pct}%
-                              {rc.warning && <span style={{ color: "#ffd32a", marginLeft: 8 }}>⚠ {rc.warning}</span>}
-                            </div>
-                          )}
-                          <div style={{ fontSize: 11, color: "#555", fontFamily: "var(--mono)" }}>${Number(s.price).toLocaleString()} · {s.created_at ? formatTs(s.created_at) : ""}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <SignalsTab signals={signals} formatTs={formatTs} />
             ) : activeTab === "scanner" ? (
               <ScannerTab
                 onAddToWatchlist={addToWatchlist}

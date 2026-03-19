@@ -7,6 +7,7 @@
 import { Router, Request, Response } from "express";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { GEMINI_TOOLS } from "../services/chatTools";
+import { GEMINI_MODEL } from "../services/gemini";
 
 type ChatDeps = {
   db: import("sql.js").Database;
@@ -55,7 +56,7 @@ export function createChatRouter(deps: ChatDeps): Router {
     try {
       const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: GEMINI_MODEL,
         systemInstruction: fullSystemPrompt,
         generationConfig: { maxOutputTokens: useQuickMode ? 512 : 4096 },
         ...(useQuickMode ? {} : { tools: GEMINI_TOOLS }),

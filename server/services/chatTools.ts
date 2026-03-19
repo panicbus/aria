@@ -296,7 +296,10 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
         const query = String(input?.query ?? "").trim();
         if (!query) return { error: "query is required" };
         const key = process.env.TAVILY_API_KEY?.trim();
-        if (!key) return { error: "TAVILY_API_KEY not set in .env. Add it to enable web search." };
+        if (!key) {
+          console.warn("[web_search] TAVILY_API_KEY not set in .env");
+          return { error: "TAVILY_API_KEY not set in .env. Add it to enable web search." };
+        }
         const maxResults = typeof input?.max_results === "number" && input.max_results > 0 && input.max_results <= 10 ? input.max_results : 5;
         try {
           const res = await fetch("https://api.tavily.com/search", {
@@ -305,10 +308,15 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
             body: JSON.stringify({ query, search_depth: "basic", max_results: maxResults }),
           });
           const data = (await res.json()) as { results?: Array<{ title: string; url: string; content: string }>; error?: string };
-          if (!res.ok) return { error: data?.error ?? `Tavily API error ${res.status}` };
+          if (!res.ok) {
+            const errMsg = data?.error ?? `Tavily API error ${res.status}`;
+            console.warn("[web_search] Tavily API error:", res.status, errMsg);
+            return { error: errMsg };
+          }
           return { results: data.results ?? [] };
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
+          console.warn("[web_search] Request failed:", msg);
           return { error: `Web search failed: ${msg}` };
         }
       }
