@@ -166,10 +166,10 @@ async function start() {
   if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 
   const SQL = await initSqlJs();
-  const fileBuffer = fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH) : undefined;
-  db = new SQL.Database(fileBuffer);
+  let fileBuffer: Buffer | undefined = fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH) : undefined;
 
-  db.run(`
+  function runSchema(): void {
+    db.run(`
     CREATE TABLE IF NOT EXISTS messages (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       role TEXT NOT NULL,
@@ -319,6 +319,54 @@ async function start() {
     );
     saveDb();
     console.log("Seeded watchlist_core with default tickers");
+  }
+
+  }
+
+  function loadDb(): void {
+    db = new SQL.Database(fileBuffer);
+    runSchema();
+  }
+
+  try {
+    loadDb();
+  } catch (err) {
+    const msg = (err as Error)?.message ?? String(err);
+    console.warn("DB load failed (possibly corrupted). Attempting restore:", msg);
+    if (fs.existsSync(DB_PATH)) {
+      try {
+        fs.unlinkSync(DB_PATH);
+      } catch (_) {}
+    }
+    const backupDir = path.join(DATA_DIR, "backups");
+    if (fs.existsSync(backupDir)) {
+      const backups = fs.readdirSync(backupDir).filter((f) => f.startsWith("aria-") && f.endsWith(".db")).sort().reverse();
+      if (backups.length > 0) {
+        const latest = path.join(backupDir, backups[0]);
+        console.log(`Restoring from ${backups[0]}...`);
+        fs.copyFileSync(latest, DB_PATH);
+        fileBuffer = fs.readFileSync(DB_PATH);
+        try {
+          loadDb();
+          console.log("DB restored from backup.");
+        } catch (_) {
+          console.warn("Backup malformed. Starting fresh.");
+          fileBuffer = undefined;
+          db = new SQL.Database();
+          runSchema();
+        }
+      } else {
+        console.warn("No backups. Starting fresh.");
+        fileBuffer = undefined;
+        db = new SQL.Database();
+        runSchema();
+      }
+    } else {
+      console.warn("No backup dir. Starting fresh.");
+      fileBuffer = undefined;
+      db = new SQL.Database();
+      runSchema();
+    }
   }
 
   const buildLiveContext = createBuildLiveContext({ execAll });
@@ -515,18 +563,18 @@ async function start() {
 
   const TZ = "America/Los_Angeles";
 
-  // DB backup — 3am Pacific on 1st and 15th of each month (~every 14 days)
-  cron.schedule("0 3 1,15 * *", () => {
+  // DB backup — 3am Pacific every 3 days (days 1, 4, 7, 10, …)
+  cron.schedule("0 3 */3 * *", () => {
     backupDb();
   }, { timezone: TZ });
 
-  // OHLCV refresh — daily at 06:00 Pacific, before morning briefing (Alphavantage free tier: 25 req/day)
-  cron.schedule("0 6 * * *", () => {
+  // OHLCV refresh — daily at 05:30 Pacific (staggered to avoid memory spike with scanner/briefing)
+  cron.schedule("30 5 * * *", () => {
     fetchAndStoreOHLCV().catch((err) => console.error("OHLCV refresh failed:", err));
   }, { timezone: TZ });
 
-  // Scanner — daily at 06:30 Pacific, before 7am morning briefing
-  cron.schedule("30 6 * * *", () => {
+  // Scanner — daily at 06:00 Pacific (1h before briefing to avoid overlap)
+  cron.schedule("0 6 * * *", () => {
     scannerService.runScan().catch((err) => console.error("Scanner failed:", err));
   }, { timezone: TZ });
 
