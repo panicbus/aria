@@ -16,6 +16,39 @@ type DbContext = {
   cryptoIds: Record<string, string>;
 };
 
+/** Safe ticker for OHLCV path/SQL (letters, digits, dot only). */
+function normalizeOhlcvSymbol(raw: string): string | null {
+  const s = String(raw || "").toUpperCase().trim();
+  if (!/^[A-Z0-9.]{1,10}$/.test(s)) return null;
+  return s;
+}
+
+function sqlQuote(s: string): string {
+  return s.replace(/'/g, "''");
+}
+
+/** Symbol may be refreshed if it appears in watchlist, prices, portfolio, or position_* memories (sidebar holdings). */
+function symbolTrackedForOhlcvRefresh(symbol: string, execAll: DbContext["execAll"], getWatchedTickers: () => string[]): boolean {
+  if (getWatchedTickers().includes(symbol)) return true;
+  const e = sqlQuote(symbol);
+  if (execAll<{ x: number }>(`SELECT 1 AS x FROM prices WHERE upper(symbol) = '${e}' LIMIT 1`).length) return true;
+  if (execAll<{ x: number }>(`SELECT 1 AS x FROM crypto_portfolio WHERE upper(symbol) = '${e}' LIMIT 1`).length) return true;
+  const posRows = execAll<{ key: string; value: string }>("SELECT key, value FROM memories WHERE key LIKE 'position_%'");
+  for (const row of posRows) {
+    const tickerFromKey = row.key.replace(/^position_/i, "").toUpperCase();
+    if (!/^[A-Z0-9.]{1,6}$/.test(tickerFromKey) || tickerFromKey.includes("_")) continue;
+    let t = tickerFromKey;
+    try {
+      const pos = JSON.parse(row.value) as { ticker?: string };
+      t = (pos?.ticker ?? tickerFromKey).toUpperCase();
+    } catch (_) {
+      /* use tickerFromKey */
+    }
+    if (t === symbol) return true;
+  }
+  return false;
+}
+
 export function createOhlcvRouter(ctx: DbContext): Router {
   const router = Router();
   const { db, execAll, saveDb, getWatchedTickers, fetchAndStoreOHLCV, cryptoIds } = ctx;
@@ -35,15 +68,12 @@ export function createOhlcvRouter(ctx: DbContext): Router {
   });
 
   router.get("/:symbol", (req: Request, res: Response) => {
-    const symbol = String(req.params.symbol || "").toUpperCase();
+    const symbol = normalizeOhlcvSymbol(String(req.params.symbol || ""));
     const days = Math.min(365, Math.max(1, parseInt(String(req.query.days || 90), 10) || 90));
     if (!symbol) return res.status(400).json({ error: "symbol required" });
-    const watched = getWatchedTickers();
-    if (!watched.includes(symbol)) {
-      return res.status(400).json({ error: `Unknown symbol. Watched: ${watched.join(", ")}` });
-    }
+    // No "watched only" gate: after DB reset, holdings charts must load bars if present (may be [] until refresh).
     const rows = execAll<{ date: string; open: number; high: number; low: number; close: number; volume: number }>(
-      `SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = '${symbol}' ORDER BY date DESC LIMIT ${days}`
+      `SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = '${sqlQuote(symbol)}' ORDER BY date DESC LIMIT ${days}`
     );
     res.json(rows.reverse()); // Chronological for charts
   });
@@ -54,11 +84,12 @@ export function createOhlcvRouter(ctx: DbContext): Router {
   });
 
   router.post("/refresh/:symbol", async (req: Request, res: Response) => {
-    const symbol = String(req.params.symbol || "").toUpperCase();
+    const symbol = normalizeOhlcvSymbol(String(req.params.symbol || ""));
     if (!symbol) return res.status(400).json({ error: "symbol required" });
-    const watched = getWatchedTickers();
-    if (!watched.includes(symbol)) {
-      return res.status(400).json({ error: `Symbol ${symbol} not in watched list. Add to Memory watchlist or as a position.` });
+    if (!symbolTrackedForOhlcvRefresh(symbol, execAll, getWatchedTickers)) {
+      return res.status(400).json({
+        error: `${symbol} is not linked to your watchlist, holdings, or dashboard prices. Add the ticker to Memory (watchlist or position) or wait for prices to sync.`,
+      });
     }
     try {
       const result = await fetchOHLCVForTicker(symbol, { cryptoIds });
