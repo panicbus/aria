@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useLayoutEffect } from "react";
 
 import { HoldingsCard } from "../holdings/HoldingsCard";
 import { API, DASHBOARD_POLL_MS } from "../../config";
 import type { Dashboard, Memory, CryptoPortfolioHolding } from "../../types";
 
-const CARD_H = 130;
-const CRYPTO_CARD_H = 72;
-const GAP = 7;
+/** Minimum open height so the accordion animates smoothly before first measure. */
+const MIN_OPEN_HEIGHT = 80;
 
 export function HoldingsAccordion({
   memories,
@@ -26,6 +25,9 @@ export function HoldingsAccordion({
   refreshTrigger?: number;
 }) {
   const [cryptoPortfolio, setCryptoPortfolio] = useState<CryptoPortfolioHolding[]>([]);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [measuredHeight, setMeasuredHeight] = useState(MIN_OPEN_HEIGHT);
+  const [hasMeasured, setHasMeasured] = useState(false);
 
   useEffect(() => {
     const load = () =>
@@ -53,10 +55,34 @@ export function HoldingsAccordion({
   const buyingPower = cryptoPortfolio[0]?.buying_power ?? 0;
   const isStale = cryptoPortfolio.some((c) => c.source === "robinhood_stale");
 
-  const cryptoHeight = hasCrypto ? cryptoPortfolio.length * CRYPTO_CARD_H + (cryptoPortfolio.length - 1) * GAP : 0;
-  const memoryHeight = memoryPositionsFiltered.length > 0 ? memoryPositionsFiltered.length * CARD_H + (memoryPositionsFiltered.length - 1) * GAP : 0;
-  const totalContentHeight = cryptoHeight + (hasCrypto && memoryHeight > 0 ? 12 + memoryHeight : memoryHeight);
-  const maxHeight = open ? (totalContentHeight > 0 ? totalContentHeight + 40 : 80) : 0;
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!open || !el) {
+      if (!open) setHasMeasured(false);
+      return;
+    }
+    const measure = () => {
+      setMeasuredHeight(Math.max(MIN_OPEN_HEIGHT, el.scrollHeight));
+      setHasMeasured(true);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [
+    open,
+    positions.length,
+    memoryPositionsFiltered.length,
+    hasCrypto,
+    cryptoPortfolio.length,
+    buyingPower,
+    isStale,
+    memories.length,
+    refreshTrigger,
+    dashboard?.prices?.length,
+  ]);
+
+  const maxHeight = open ? (hasMeasured ? measuredHeight : 10000) : 0;
 
   return (
     <div>
@@ -76,7 +102,7 @@ export function HoldingsAccordion({
         )}
       </div>
       <div style={{ overflow: "hidden", maxHeight, transition: "max-height 0.3s ease" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        <div ref={contentRef} style={{ display: "flex", flexDirection: "column", gap: 7 }}>
           {hasCrypto &&
             cryptoPortfolio.map((c) => (
               <div

@@ -61,42 +61,116 @@ function parseOHLCVFromCrypto(data: Record<string, unknown>, symbol: string): OH
   });
 }
 
+export type OHLCVFetchResult = {
+  rows: OHLCVRow[];
+  raw?: string;
+  detail?: string;
+  source?: "alphavantage" | "coingecko";
+};
+
+/** Historical closes for sidebar charts when Alpha Vantage is missing or rate-limited (BTC/ETH only). */
+async function fetchOhlcvFromCoinGecko(geckoId: string, symbol: string): Promise<OHLCVRow[]> {
+  try {
+    const url = `https://api.coingecko.com/api/v3/coins/${encodeURIComponent(geckoId)}/market_chart?vs_currency=usd&days=90`;
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { prices?: [number, number][] };
+    const prices = data.prices ?? [];
+    const byDate = new Map<string, number>();
+    for (const [ts, price] of prices) {
+      const d = new Date(ts).toISOString().slice(0, 10);
+      byDate.set(d, price);
+    }
+    const dates = [...byDate.keys()].sort();
+    const rows = dates.map((date) => {
+      const c = byDate.get(date)!;
+      return { symbol, date, open: c, high: c, low: c, close: c, volume: 0 };
+    });
+    return rows.slice(-OHLCV_DAYS);
+  } catch (e) {
+    console.error(`CoinGecko OHLCV ${symbol}:`, e);
+    return [];
+  }
+}
+
 export async function fetchOHLCVForTicker(
   symbol: string,
   options?: { cryptoIds?: Record<string, string> }
-): Promise<{ rows: OHLCVRow[]; raw?: string } | null> {
+): Promise<OHLCVFetchResult> {
   const cryptoIds = options?.cryptoIds ?? { BTC: "bitcoin", ETH: "ethereum" };
+  const upper = symbol.toUpperCase();
+  const isCrypto = upper in cryptoIds;
+  const geckoId = isCrypto ? (cryptoIds[upper] ?? "") : "";
   const key = process.env.ALPHAVANTAGE_API_KEY?.trim();
+
   if (!key) {
-    console.warn("OHLCV: Add ALPHAVANTAGE_API_KEY to .env (free at alphavantage.co)");
-    return null;
+    console.warn("OHLCV: ALPHAVANTAGE_API_KEY not set — stocks need it; trying CoinGecko for BTC/ETH only.");
+    if (isCrypto && geckoId) {
+      const rows = await fetchOhlcvFromCoinGecko(geckoId, upper);
+      return rows.length
+        ? { rows, source: "coingecko" }
+        : {
+            rows: [],
+            detail:
+              "No API key and CoinGecko returned no data. Set ALPHAVANTAGE_API_KEY in .env / fly secrets for stocks; check network for crypto.",
+          };
+    }
+    return {
+      rows: [],
+      detail:
+        "ALPHAVANTAGE_API_KEY is not set on the server. Add it to .env (local) or run: fly secrets set ALPHAVANTAGE_API_KEY=YOUR_KEY -a <app>",
+    };
   }
-  const isCrypto = symbol in cryptoIds;
+
   let url: string;
   if (isCrypto) {
-    url = alphavantageUrl({ function: "DIGITAL_CURRENCY_DAILY", symbol, market: "USD", outputsize: "full" });
+    url = alphavantageUrl({ function: "DIGITAL_CURRENCY_DAILY", symbol: upper, market: "USD", outputsize: "full" });
   } else {
-    url = alphavantageUrl({ function: "TIME_SERIES_DAILY", symbol, outputsize: "compact", datatype: "json" });
+    url = alphavantageUrl({ function: "TIME_SERIES_DAILY", symbol: upper, outputsize: "compact", datatype: "json" });
   }
   try {
     const res = await fetch(url);
     const data = (await res.json()) as Record<string, unknown>;
     const raw = JSON.stringify(data);
-    if (data.Note || data["Error Message"]) {
-      console.warn(`OHLCV ${symbol}:`, (data.Note ?? data["Error Message"]) as string);
-      return null;
+    const avNote = (data.Note ?? data["Error Message"]) as string | undefined;
+    if (avNote) {
+      console.warn(`OHLCV ${upper} (Alpha Vantage):`, avNote);
+      if (isCrypto && geckoId) {
+        const rows = await fetchOhlcvFromCoinGecko(geckoId, upper);
+        if (rows.length) {
+          return {
+            rows,
+            source: "coingecko",
+            detail: `Alpha Vantage unavailable (${avNote.slice(0, 120)}…). Using CoinGecko history.`,
+          };
+        }
+      }
+      return { rows: [], raw, detail: avNote };
     }
     let rows: OHLCVRow[];
     if (isCrypto) {
-      rows = parseOHLCVFromCrypto(data, symbol);
+      rows = parseOHLCVFromCrypto(data, upper);
     } else {
       const parsed = parseOHLCVFromStock(data);
-      rows = parsed.map((r) => ({ ...r, symbol }));
+      rows = parsed.map((r) => ({ ...r, symbol: upper }));
     }
-    return { rows: rows.slice(0, OHLCV_DAYS), raw };
+    rows = rows.slice(0, OHLCV_DAYS);
+    if (rows.length === 0 && isCrypto && geckoId) {
+      const cg = await fetchOhlcvFromCoinGecko(geckoId, upper);
+      if (cg.length) return { rows: cg, source: "coingecko", detail: "Used CoinGecko (Alpha Vantage had no series)." };
+    }
+    if (rows.length === 0) {
+      return { rows: [], raw, detail: "No daily series in Alpha Vantage response (check symbol or premium endpoint)." };
+    }
+    return { rows, raw, source: "alphavantage" };
   } catch (e) {
-    console.error(`OHLCV fetch ${symbol}:`, e);
-    return null;
+    console.error(`OHLCV fetch ${upper}:`, e);
+    if (isCrypto && geckoId) {
+      const rows = await fetchOhlcvFromCoinGecko(geckoId, upper);
+      if (rows.length) return { rows, source: "coingecko", detail: "Alpha Vantage request failed; used CoinGecko." };
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return { rows: [], detail: msg };
   }
 }
 
@@ -117,11 +191,12 @@ export function createFetchAndStoreOHLCV(deps: {
     for (let i = 0; i < tickers.length; i++) {
       const symbol = tickers[i];
       const result = await fetchOHLCVForTicker(symbol, { cryptoIds });
-      if (!result?.rows.length) {
-        console.warn(`OHLCV skip ${symbol} (no data or rate limited)`);
+      if (!result.rows.length) {
+        console.warn(`OHLCV skip ${symbol}:`, result.detail ?? "no data or rate limited");
         await new Promise((r) => setTimeout(r, 13000));
         continue;
       }
+      const rowSource = result.source ?? "alphavantage";
       for (const r of result.rows) {
         db.run(
           `INSERT OR IGNORE INTO ohlcv (symbol, date, open, high, low, close, volume, source, created_at)
@@ -134,7 +209,7 @@ export function createFetchAndStoreOHLCV(deps: {
             ":low": r.low,
             ":close": r.close,
             ":volume": r.volume,
-            ":source": "alphavantage",
+            ":source": rowSource,
             ":created_at": new Date().toISOString(),
           }
         );
@@ -148,7 +223,9 @@ export function createFetchAndStoreOHLCV(deps: {
       }
       saveDb();
       console.log(`OHLCV stored ${symbol} (${result.rows.length} bars) [${i + 1}/${tickers.length}]`);
-      await new Promise((r) => setTimeout(r, 13000)); // Alphavantage free: 5 req/min → need ~13s between calls
+      if (rowSource === "alphavantage") {
+        await new Promise((r) => setTimeout(r, 13000)); // Free tier: 5 calls/min
+      }
     }
   };
 }

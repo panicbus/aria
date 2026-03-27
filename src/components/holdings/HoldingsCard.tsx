@@ -138,7 +138,7 @@ export function HoldingsCard({ memoryKey, pos, currentPrice, apiBase }: Holdings
           Chart
         </button>
       </div>
-      <div style={{ padding: "10px 12px", height: 85 }}>
+      <div style={{ padding: "10px 12px", minHeight: 85 }}>
         {tab === "summary" ? (
           <>
             <div

@@ -172,7 +172,8 @@ export function createScannerService(deps: ScannerDeps) {
         const isCrypto = cryptoIds && symbol in cryptoIds;
         if (isCrypto) continue;
         const result = await fetchOHLCVForTicker(symbol, { cryptoIds });
-        if (result?.rows?.length) {
+        if (result.rows.length) {
+          const rowSource = result.source ?? "alphavantage";
           for (const r of result.rows) {
             db.run(
               `INSERT OR IGNORE INTO ohlcv (symbol, date, open, high, low, close, volume, source, created_at)
@@ -185,14 +186,16 @@ export function createScannerService(deps: ScannerDeps) {
                 ":low": r.low,
                 ":close": r.close,
                 ":volume": r.volume,
-                ":source": "alphavantage",
+                ":source": rowSource,
                 ":created_at": new Date().toISOString(),
               }
             );
           }
-          incrementAlphavantageCalls(execAll, run, saveDb);
-          avCalls++;
-          await new Promise((r) => setTimeout(r, 13000));
+          if (rowSource === "alphavantage") {
+            incrementAlphavantageCalls(execAll, run, saveDb);
+            avCalls++;
+            await new Promise((r) => setTimeout(r, 13000));
+          }
         }
       }
 

@@ -187,10 +187,13 @@ type ChatToolsDeps = {
   getRiskContextForTicker: (ticker: string, signal?: string, indicatorData?: { score?: number } | null) => RiskContext;
   generateSignalForTicker: (ticker: string) => Promise<{ id: number; ticker: string; signal: string; reasoning: string; price: number; indicator_data: string | null } | null>;
   getScannerTopPicks?: (scoreMin?: number) => Array<{ symbol: string; signal: string; score: number; rsi: number | null; aria_reasoning: string | null; price: number; change_24h: number | null; category: string }>;
+  /** Updates memory_guard.json when watchlists / positions / remember() persist. */
+  onMemoriesPersist?: () => void;
 };
 
 export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input: any) => Promise<any> {
-  const { db, execAll, saveDb, getWatchedTickers, getRiskContextForTicker, generateSignalForTicker, getScannerTopPicks } = deps;
+  const { db, execAll, saveDb, getWatchedTickers, getRiskContextForTicker, generateSignalForTicker, getScannerTopPicks, onMemoriesPersist } = deps;
+  const touchGuard = () => onMemoriesPersist?.();
 
   return async function handleToolCall(name: string, input: any): Promise<any> {
     switch (name) {
@@ -262,6 +265,7 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
           { ":key": key, ":value": value, ":confidence": confidence, ":source": source, ":updated_at": updated_at, ":created_at": created_at }
         );
         saveDb();
+        touchGuard();
         return { status: "ok" };
       }
       case "recall": {
@@ -379,6 +383,7 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
           { ":key": list, ":value": JSON.stringify(arr), ":confidence": 1, ":source": "explicit", ":updated_at": now, ":created_at": now }
         );
         saveDb();
+        touchGuard();
         return { status: "ok", message: `Added ${ticker} to watchlist`, watchlist: arr };
       }
       case "remove_from_watchlist": {
@@ -402,6 +407,7 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
           { ":key": list, ":value": JSON.stringify(filtered), ":confidence": 1, ":source": "explicit", ":updated_at": now, ":created_at": now }
         );
         saveDb();
+        touchGuard();
         return { status: "ok", message: `Removed ${ticker} from watchlist`, watchlist: filtered };
       }
       case "add_position": {
@@ -424,6 +430,7 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
           { ":key": key, ":value": value, ":updated_at": now, ":created_at": now }
         );
         saveDb();
+        touchGuard();
         return { status: "ok", message: `Updated ${ticker}: ${quantity} shares${!isNaN(average_cost) && average_cost > 0 ? ` @ $${average_cost}` : ""}` };
       }
       case "remove_position": {
@@ -433,6 +440,7 @@ export function createHandleToolCall(deps: ChatToolsDeps): (name: string, input:
         const existed = execAll<{ key: string }>(`SELECT key FROM memories WHERE key = '${key.replace(/'/g, "''")}' LIMIT 1`);
         db.run("DELETE FROM memories WHERE key = :key", { ":key": key });
         saveDb();
+        touchGuard();
         return { status: "ok", message: existed.length ? `Removed ${ticker} from holdings` : `${ticker} was not in holdings`, removed: existed.length > 0 };
       }
       default:

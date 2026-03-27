@@ -27,6 +27,7 @@ import { createPortfolioRouter } from "./routes/portfolio";
 import { fetchCryptoPortfolioSummary, logRobinhoodStatus } from "./services/robinhood";
 import { createPruneStorage } from "./services/prune";
 import { parseWatchlistValue } from "./utils/watchlist";
+import { restoreMemoryGuardIfNeeded, snapshotMemoryGuard } from "./utils/memoryGuard";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -103,6 +104,7 @@ function backupDb(): void {
       fs.unlinkSync(path.join(BACKUP_DIR, files.pop()!));
     }
     console.log(`DB backup: ${dest}`);
+    snapshotMemoryGuard(DATA_DIR, execAll);
   } catch (e) {
     console.error("Backup failed:", e);
   }
@@ -371,6 +373,9 @@ async function start() {
   } catch (_) {}
   saveDb();
 
+  // Restore watchlists / positions from memory_guard.json when DB rows are empty but the guard still has data (survives silent wipes).
+  restoreMemoryGuardIfNeeded(DATA_DIR, execAll, run, saveDb);
+
   // WAYPOINT [seed-watchlist]: If watchlist_core is empty or missing, seed with Nico's known watchlist so it survives fresh deploys
   const existingWatchlist = execAll<{ value: string }>("SELECT value FROM memories WHERE key = 'watchlist_core' LIMIT 1");
   const watchlistVal = existingWatchlist[0]?.value?.trim();
@@ -386,6 +391,8 @@ async function start() {
     saveDb();
     console.log("Seeded watchlist_core with default tickers");
   }
+
+  snapshotMemoryGuard(DATA_DIR, execAll);
 
   }
 
@@ -487,6 +494,8 @@ async function start() {
     getScannerTopPicks: () => scannerService.getTopPicks(3),
   });
 
+  const persistMemoryGuard = () => snapshotMemoryGuard(DATA_DIR, execAll);
+
   const handleToolCall = createHandleToolCall({
     db,
     execAll,
@@ -495,6 +504,7 @@ async function start() {
     getRiskContextForTicker,
     generateSignalForTicker,
     getScannerTopPicks: (min) => scannerService.getTopPicks(min ?? 0),
+    onMemoriesPersist: persistMemoryGuard,
   });
   const runMemoryExtraction = createRunMemoryExtraction({ handleToolCall });
 
@@ -522,7 +532,7 @@ async function start() {
     handleToolCall,
     runMemoryExtraction,
   }));
-  app.use("/api/memories", createMemoriesRouter({ db, execAll, saveDb }));
+  app.use("/api/memories", createMemoriesRouter({ db, execAll, saveDb, dataDir: DATA_DIR }));
   app.use("/api/scanner", createScannerRouter({
     getActiveUniverse: scannerService.getActiveUniverse,
     triggerScan: scannerService.triggerScan,

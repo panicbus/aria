@@ -31,12 +31,22 @@ export function createHealthRouter(deps?: HealthDeps): Router {
       messageCount = rows[0]?.cnt ?? 0;
     } catch (_) {}
     const dataDirExists = fs.existsSync(dataDir);
+    let ohlcvSymbols: Record<string, number> = {};
+    try {
+      const rows = execAll<{ symbol: string; cnt: number }>(
+        "SELECT symbol, COUNT(*) AS cnt FROM ohlcv GROUP BY symbol"
+      );
+      for (const r of rows) ohlcvSymbols[r.symbol] = r.cnt;
+    } catch (_) {}
+
     res.json({
       dataDir,
       dbPath,
       dataDirExists,
       dbExists,
       messageCount,
+      alphavantageConfigured: !!process.env.ALPHAVANTAGE_API_KEY?.trim(),
+      ohlcvSymbols,
       timestamp: new Date().toISOString(),
     });
   });

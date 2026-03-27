@@ -26,8 +26,17 @@ export const markdownChatStyles = {
 };
 
 export function MarkdownContent({ content, className = "" }: { content: string; className?: string }) {
+  const trimmed = (content ?? "").replace(/^\uFEFF/, "").trim();
+  if (!trimmed) {
+    return (
+      <span style={{ color: "#666", fontFamily: "var(--mono)", fontSize: 12, fontStyle: "italic" }}>
+        (no text in this message)
+      </span>
+    );
+  }
+
   return (
-    <div className={className} style={{ wordBreak: "break-word" }}>
+    <div className={className} style={{ wordBreak: "break-word", color: "#ccc" }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -55,7 +64,7 @@ export function MarkdownContent({ content, className = "" }: { content: string; 
           hr: () => <hr style={markdownChatStyles.hr} />,
         }}
       >
-        {content}
+        {trimmed}
       </ReactMarkdown>
     </div>
   );

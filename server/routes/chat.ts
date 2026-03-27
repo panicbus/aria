@@ -74,12 +74,14 @@ export function createChatRouter(deps: ChatDeps): Router {
 
       const chat = model.startChat({ history: geminiHistory });
       let result = await chat.sendMessage(lastMessage);
+      let toolFollowUpRounds = 0;
 
       while (true) {
         const response = result.response;
         const functionCalls = response.functionCalls?.();
         if (!functionCalls || functionCalls.length === 0) break;
 
+        toolFollowUpRounds += 1;
         const toolResults = [];
         for (const call of functionCalls) {
           const toolResult = await handleToolCall(call.name, call.args ?? {});
@@ -97,7 +99,14 @@ export function createChatRouter(deps: ChatDeps): Router {
         result = await chat.sendMessage(toolResults);
       }
 
-      const reply = (result.response as { text?: () => string }).text?.() ?? "";
+      /** Gemini sometimes returns a final candidate with no text parts after tools — `text()` is "" and the UI shows an empty bubble. */
+      let reply = result.response.text().replace(/^\uFEFF/g, "").trim();
+      if (!reply) {
+        reply =
+          toolFollowUpRounds > 0
+            ? "Done — I applied those changes in the background. Ask if you want a fuller summary."
+            : "I didn't get a text reply from the model (empty response). Try again, or toggle Quick off if you need tools / a longer answer.";
+      }
 
       db.run("INSERT INTO messages (role, content) VALUES (:role, :content)", {
         ":role": "assistant",

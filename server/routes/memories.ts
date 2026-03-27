@@ -5,6 +5,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { snapshotMemoryGuard } from "../utils/memoryGuard";
 
 type MemoryRow = {
   id: number;
@@ -20,11 +21,14 @@ type DbContext = {
   db: import("sql.js").Database;
   execAll: <T extends Record<string, unknown>>(sql: string) => T[];
   saveDb: () => void;
+  dataDir: string;
 };
 
 export function createMemoriesRouter(ctx: DbContext): Router {
   const router = Router();
-  const { db, execAll, saveDb } = ctx;
+  const { db, execAll, saveDb, dataDir } = ctx;
+
+  const persistGuard = () => snapshotMemoryGuard(dataDir, execAll);
 
   // WAYPOINT [memories-api]
   // WHAT: GET returns all memories; POST create/update; DELETE one by key or clear all; GET /export for JSON.
@@ -73,6 +77,7 @@ export function createMemoriesRouter(ctx: DbContext): Router {
       count++;
     }
     saveDb();
+    persistGuard();
     res.json({ imported: count });
   });
 
@@ -90,6 +95,7 @@ export function createMemoriesRouter(ctx: DbContext): Router {
       { ":key": key, ":value": valueStr, ":confidence": conf, ":source": src, ":updated_at": updated_at, ":created_at": created_at }
     );
     saveDb();
+    persistGuard();
     const row = execAll<MemoryRow>(`SELECT id, key, value, confidence, source, updated_at, created_at FROM memories WHERE key = '${String(key).replace(/'/g, "''")}'`);
     res.json(row[0] ?? { key, value: valueStr, confidence: conf, source: src, updated_at, created_at });
   });
@@ -97,6 +103,7 @@ export function createMemoriesRouter(ctx: DbContext): Router {
   router.delete("/", (req: Request, res: Response) => {
     db.run("DELETE FROM memories");
     saveDb();
+    persistGuard();
     res.json({ cleared: true });
   });
 
@@ -105,6 +112,7 @@ export function createMemoriesRouter(ctx: DbContext): Router {
     if (!key) return res.status(400).json({ error: "key required" });
     db.run("DELETE FROM memories WHERE key = :key", { ":key": key });
     saveDb();
+    persistGuard();
     res.json({ deleted: key });
   });
 

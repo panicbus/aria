@@ -3,6 +3,7 @@ dist/
 dist-server/
 .env
 aria.db
+memory_guard.json
 *.db-shm
 *.db-wal
 backups/

@@ -6,6 +6,7 @@
 
 import { Router, Request, Response } from "express";
 import { fetchOHLCVForTicker } from "../services/ohlcv";
+import { mergeLivePriceIntoBars } from "../utils/mergeOhlcvLivePrice";
 
 type DbContext = {
   db: import("sql.js").Database;
@@ -75,7 +76,11 @@ export function createOhlcvRouter(ctx: DbContext): Router {
     const rows = execAll<{ date: string; open: number; high: number; low: number; close: number; volume: number }>(
       `SELECT date, open, high, low, close, volume FROM ohlcv WHERE symbol = '${sqlQuote(symbol)}' ORDER BY date DESC LIMIT ${days}`
     );
-    res.json(rows.reverse()); // Chronological for charts
+    const chronological = rows.reverse();
+    const liveRow = execAll<{ price: number; updated_at: string }>(
+      `SELECT price, updated_at FROM prices WHERE upper(symbol) = '${sqlQuote(symbol)}' LIMIT 1`
+    )[0];
+    res.json(mergeLivePriceIntoBars(chronological, liveRow));
   });
 
   router.post("/refresh-all", (req: Request, res: Response) => {
@@ -93,16 +98,13 @@ export function createOhlcvRouter(ctx: DbContext): Router {
     }
     try {
       const result = await fetchOHLCVForTicker(symbol, { cryptoIds });
-      if (!result || !result.rows?.length) {
-        let detail = "No data returned";
-        if (result?.raw) {
-          try {
-            const parsed = JSON.parse(result.raw) as Record<string, string>;
-            detail = parsed.Note ?? parsed["Error Message"] ?? detail;
-          } catch (_) {}
-        }
-        return res.status(502).json({ error: "Alphavantage returned no data", detail });
+      if (!result.rows.length) {
+        return res.status(502).json({
+          error: "No OHLCV data stored",
+          detail: result.detail ?? "No rows returned (check ALPHAVANTAGE_API_KEY on Fly, rate limits, or symbol).",
+        });
       }
+      const rowSource = result.source ?? "alphavantage";
       for (const r of result.rows) {
         db.run(
           `INSERT OR IGNORE INTO ohlcv (symbol, date, open, high, low, close, volume, source, created_at)
@@ -115,13 +117,13 @@ export function createOhlcvRouter(ctx: DbContext): Router {
             ":low": r.low,
             ":close": r.close,
             ":volume": r.volume,
-            ":source": "alphavantage",
+            ":source": rowSource,
             ":created_at": new Date().toISOString(),
           }
         );
       }
       saveDb();
-      res.json({ ok: true, symbol, rows: result.rows.length });
+      res.json({ ok: true, symbol, rows: result.rows.length, source: rowSource, note: result.detail });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       res.status(500).json({ error: "Refresh failed", detail: msg });
