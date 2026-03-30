@@ -109,12 +109,13 @@ export function createDashboardRouter(ctx: DbContext): Router {
     res.json({ prices, news, tickers: tickers.length > 0 ? tickers : getWatchedTickers(), signalsByTicker: Object.fromEntries(byTicker) });
   });
 
-  // WAYPOINT: Market Pulse Endpoint
-  // WHAT: Returns dynamic ticker list with prices and signals for the sidebar.
-  // WHY: Sidebar must reflect current portfolio and watchlist from memory.
-  // HOW IT HELPS NICO: Add position via chat → appears in Market Pulse within 60s.
+  // WAYPOINT: Market Health Endpoint
+  // WHAT: Returns 4 market health tickers + top 3 scanner picks for the sidebar.
+  // WHY: Sidebar shows broad market sentiment and ARIA's best current ideas at a glance.
+  // HOW IT HELPS NICO: Instant read on market fear, tech health, and today's scanner picks.
+  const MARKET_HEALTH = ["SPY", "QQQ", "BTC", "VIX"];
+
   router.get("/dashboard/market-pulse", (req: Request, res: Response) => {
-    const entries = buildMarketPulseTickers(execAll);
     const priceRows = execAll<PriceRow>("SELECT symbol, price, change_24h, source, updated_at FROM prices ORDER BY updated_at DESC");
     const signalRows = execAll<{ ticker: string; signal: string; indicator_data: string | null }>(
       "SELECT ticker, signal, indicator_data FROM signals ORDER BY created_at DESC"
@@ -128,18 +129,15 @@ export function createDashboardRouter(ctx: DbContext): Router {
       if (!bySymbolSignal.has(s.ticker)) bySymbolSignal.set(s.ticker, { signal: s.signal, indicator_data: s.indicator_data });
     }
 
-    const items = entries.map(({ ticker: sym, category }) => {
+    const enrichTicker = (sym: string) => {
       const p = bySymbolPrice.get(sym);
       const sig = bySymbolSignal.get(sym);
       let ind: { score?: number; rsi?: number } | null = null;
       if (sig?.indicator_data) {
-        try {
-          ind = JSON.parse(sig.indicator_data);
-        } catch (_) {}
+        try { ind = JSON.parse(sig.indicator_data); } catch (_) {}
       }
       return {
         symbol: sym,
-        category,
         price: p?.price ?? null,
         change_24h: p?.change_24h ?? null,
         signal: sig?.signal ?? null,
@@ -147,9 +145,50 @@ export function createDashboardRouter(ctx: DbContext): Router {
         rsi: ind?.rsi ?? null,
         updated_at: p?.updated_at ?? null,
       };
+    };
+
+    const marketHealth = MARKET_HEALTH.map(enrichTicker);
+
+    const scannerPicks = execAll<{
+      symbol: string; signal: string; score: number; rsi: number | null;
+      aria_reasoning: string | null; category: string; scanned_at: string;
+    }>(
+      `SELECT symbol, signal, score, rsi, aria_reasoning, category, scanned_at
+       FROM scanner_results
+       WHERE aria_reasoning IS NOT NULL AND aria_reasoning != ''
+         AND scanned_at >= datetime('now', '-2 days')
+       ORDER BY score DESC
+       LIMIT 3`
+    ).map((r) => {
+      const p = bySymbolPrice.get(r.symbol);
+      return {
+        symbol: r.symbol,
+        signal: r.signal,
+        score: r.score,
+        rsi: r.rsi,
+        aria_reasoning: r.aria_reasoning,
+        category: r.category,
+        price: p?.price ?? null,
+        change_24h: p?.change_24h ?? null,
+      };
     });
 
-    res.json(items);
+    res.json({ marketHealth, scannerPicks });
+  });
+
+  router.get("/stock-news", (req: Request, res: Response) => {
+    const days = Math.min(30, Math.max(1, parseInt(String(req.query.days || 5), 10) || 5));
+    const rows = execAll<{
+      id: number; ticker: string; title: string; url: string;
+      summary: string | null; source: string; published_at: string; created_at: string;
+    }>(
+      `SELECT id, ticker, title, url, summary, source, published_at, created_at
+       FROM stock_news
+       WHERE published_at >= datetime('now', '-${days} days')
+       ORDER BY published_at DESC
+       LIMIT 60`
+    );
+    res.json(rows);
   });
 
   return router;

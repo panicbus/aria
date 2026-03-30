@@ -88,8 +88,8 @@ export function HoldingsAccordion({
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <button onClick={onToggle} style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, background: "none", border: "none", padding: 0, cursor: "pointer", textAlign: "left" }}>
-          <span style={{ transform: open ? "rotate(90deg)" : "none", display: "inline-block", fontSize: 10, color: "#777", transition: "transform 0.2s ease" }}>▶</span>
-          <span style={{ fontSize: 9, letterSpacing: "0.14em", color: "#444", textTransform: "uppercase", fontFamily: "var(--mono)" }}>Holdings</span>
+          <span style={{ transform: open ? "rotate(90deg)" : "none", display: "inline-block", fontSize: 10, color: "#ccc", transition: "transform 0.2s ease" }}>▶</span>
+          <span style={{ fontSize: 12, letterSpacing: "0.1em", color: "#ccc", textTransform: "uppercase", fontFamily: "var(--mono)", fontWeight: 500 }}>Holdings</span>
         </button>
         {open && (positions.length > 0 || hasCrypto) && (
           <button
@@ -115,7 +115,7 @@ export function HoldingsAccordion({
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <span style={{ fontFamily: "var(--display)", fontWeight: 700, fontSize: 11, color: "#f0f0f0" }}>{c.symbol}</span>
+                  <span style={{ fontFamily: "Syne, var(--display)", fontWeight: 700, fontSize: 13, color: "#c2c2c2" }}>{c.symbol}</span>
                   {isStale && <span style={{ fontSize: 8, color: "#ffd32a", fontFamily: "var(--mono)" }}>⚠ stale</span>}
                 </div>
                 <div style={{ fontSize: 10, color: "#888", fontFamily: "var(--mono)", marginBottom: 2 }}>

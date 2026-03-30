@@ -210,4 +210,8 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+
+  .market-health-info {
+    display: none;
+  }
 }

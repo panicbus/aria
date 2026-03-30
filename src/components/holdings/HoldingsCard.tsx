@@ -143,12 +143,11 @@ export function HoldingsCard({ memoryKey, pos, currentPrice, apiBase }: Holdings
           <>
             <div
               style={{
-                fontSize: 9,
-                letterSpacing: "0.1em",
-                color: "#888",
-                textTransform: "uppercase",
+                fontFamily: "Syne, var(--display)",
+                fontWeight: 700,
+                fontSize: 13,
+                color: "#c2c2c2",
                 marginBottom: 3,
-                fontFamily: "var(--mono)",
               }}
             >
               {ticker}
@@ -203,10 +202,10 @@ export function HoldingsCard({ memoryKey, pos, currentPrice, apiBase }: Holdings
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span
               style={{
-                fontSize: 9,
-                color: "#888",
-                fontFamily: "var(--mono)",
-                letterSpacing: "0.08em",
+                fontFamily: "Syne, var(--display)",
+                fontWeight: 700,
+                fontSize: 13,
+                color: "#c2c2c2",
               }}
             >
               {ticker}
@@ -220,10 +219,10 @@ export function HoldingsCard({ memoryKey, pos, currentPrice, apiBase }: Holdings
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span
                 style={{
-                  fontSize: 9,
-                  color: "#888",
-                  fontFamily: "var(--mono)",
-                  letterSpacing: "0.08em",
+                  fontFamily: "Syne, var(--display)",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: "#c2c2c2",
                 }}
               >
                 {ticker}
@@ -283,10 +282,10 @@ export function HoldingsCard({ memoryKey, pos, currentPrice, apiBase }: Holdings
             <div style={{ flexShrink: 0, paddingTop: 2 }}>
               <span
                 style={{
-                  fontSize: 9,
-                  color: "#888",
-                  fontFamily: "var(--mono)",
-                  letterSpacing: "0.08em",
+                  fontFamily: "Syne, var(--display)",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  color: "#c2c2c2",
                 }}
               >
                 {ticker}
@@ -332,10 +331,10 @@ export function HoldingsCard({ memoryKey, pos, currentPrice, apiBase }: Holdings
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span
               style={{
-                fontSize: 9,
-                color: "#888",
-                fontFamily: "var(--mono)",
-                letterSpacing: "0.08em",
+                fontFamily: "Syne, var(--display)",
+                fontWeight: 700,
+                fontSize: 13,
+                color: "#c2c2c2",
                 flexShrink: 0,
               }}
             >

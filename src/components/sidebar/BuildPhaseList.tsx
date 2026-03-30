@@ -6,8 +6,7 @@ const PHASES = [
   { label: "3 — The Brain", done: true, date: "Mar 15" },
   { label: "4 — The Edge", done: true, date: "Mar 16" },
   { label: "5 — The Scanner", done: true, date: "Mar 16" },
-  { label: "6a — Real Portfolio", done: true, date: "Mar 15" },
-  { label: "6b — Mobile", done: true, date: "Mar 21" },
+  { label: "6 — Real Portfolio", done: true, date: "Mar 15" },
   { label: "7 — Dynamic Universe", done: true, date: "Mar 27" },
 ];
 

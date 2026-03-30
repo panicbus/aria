@@ -171,3 +171,14 @@ export type BacktestResult = {
   equity_curve: Array<{ date: string; value: number }>;
   error?: string;
 };
+
+export interface StockNewsArticle {
+  id: number;
+  ticker: string;
+  title: string;
+  url: string;
+  summary: string | null;
+  source: string;
+  published_at: string;
+  created_at: string;
+}

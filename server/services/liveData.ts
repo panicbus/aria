@@ -263,5 +263,142 @@ Summary (25 words max):`;
     }
   }
 
-  return { fetchCoinGecko, fetchCryptoPrices, fetchStocks, fetchHN };
+  // WAYPOINT [vix-fetch]
+  // WHAT: Fetches CBOE VIX (volatility index) from Yahoo Finance.
+  // WHY: Finnhub free tier doesn't support index symbols. VIX is a key market health indicator.
+  // HOW IT HELPS NICO: At-a-glance market fear gauge in the sidebar.
+  async function fetchVIX(): Promise<void> {
+    if (!db) return;
+    try {
+      const url = "https://query1.finance.yahoo.com/v8/finance/chart/%5EVIX";
+      const res = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; ARIA/1.0)" },
+      });
+      if (!res.ok) {
+        console.warn(`VIX fetch: ${res.status}`);
+        return;
+      }
+      const data = (await res.json()) as {
+        chart?: { result?: Array<{ meta?: { regularMarketPrice?: number; previousClose?: number } }> };
+      };
+      const meta = data?.chart?.result?.[0]?.meta;
+      const price = meta?.regularMarketPrice;
+      const prevClose = meta?.previousClose;
+      if (price == null || typeof price !== "number") return;
+      const change24h = prevClose ? ((price - prevClose) / prevClose) * 100 : null;
+      const now = new Date().toISOString();
+      db.run(
+        "INSERT OR REPLACE INTO prices (symbol, price, change_24h, source, updated_at) VALUES (:symbol, :price, :change_24h, :source, :updated_at)",
+        { ":symbol": "VIX", ":price": price, ":change_24h": change24h, ":source": "yahoo", ":updated_at": now } as any
+      );
+      saveDb();
+    } catch (e) {
+      console.warn("VIX fetch error:", e);
+    }
+  }
+
+  // WAYPOINT [stock-news-tickers]
+  // WHAT: Builds a focused list of tickers for Finnhub company-news.
+  // WHY: Only fetch news for tickers Nico actually cares about — holdings + top scanner picks + market indices.
+  // HOW IT HELPS NICO: Relevant financial headlines without noise from 65 universe tickers.
+  function getStockNewsTickers(): string[] {
+    const tickers = new Set<string>();
+
+    const positions = execAll<{ key: string; value: string }>(
+      "SELECT key, value FROM memories WHERE key LIKE 'position_%'"
+    );
+    for (const row of positions) {
+      try {
+        const pos = JSON.parse(row.value) as { ticker?: string };
+        if (pos?.ticker) tickers.add(pos.ticker.toUpperCase());
+      } catch {}
+    }
+
+    const picks = execAll<{ symbol: string }>(
+      `SELECT symbol FROM scanner_results
+       WHERE aria_reasoning IS NOT NULL AND scanned_at >= datetime('now', '-2 days')
+       ORDER BY score DESC LIMIT 5`
+    );
+    for (const p of picks) tickers.add(p.symbol);
+
+    tickers.add("SPY");
+    tickers.add("QQQ");
+
+    // Finnhub company-news doesn't cover crypto
+    tickers.delete("BTC");
+    tickers.delete("ETH");
+
+    return Array.from(tickers).slice(0, 12);
+  }
+
+  // WAYPOINT [stock-news-fetch]
+  // WHAT: Fetches financial news from Finnhub for holdings and top scanner picks.
+  // WHY: Keeps Nico informed about news driving price movements in relevant stocks.
+  // HOW IT HELPS NICO: Understand WHY a stock is moving before acting on a signal.
+  async function fetchStockNews(): Promise<void> {
+    if (!db) return;
+    const key = process.env.FINNHUB_API_KEY?.trim();
+    if (!key) {
+      console.warn("Stock news: no FINNHUB_API_KEY");
+      return;
+    }
+
+    const tickers = getStockNewsTickers();
+    const now = Date.now();
+    const fromDate = new Date(now - 5 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const toDate = new Date(now).toISOString().split("T")[0];
+    let inserted = 0;
+
+    for (const ticker of tickers) {
+      try {
+        const url = `https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${fromDate}&to=${toDate}&token=${key}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          console.warn(`Stock news ${ticker}: ${res.status}`);
+          continue;
+        }
+
+        const articles = (await res.json()) as Array<{
+          headline: string; url: string; summary: string; source: string; datetime: number;
+        }>;
+        if (!Array.isArray(articles)) continue;
+
+        const recent = articles.sort((a, b) => b.datetime - a.datetime).slice(0, 5);
+
+        for (const a of recent) {
+          if (!a.headline || !a.url) continue;
+          try {
+            db.run(
+              `INSERT OR IGNORE INTO stock_news (ticker, title, url, summary, source, published_at)
+               VALUES (:ticker, :title, :url, :summary, :source, :published_at)`,
+              {
+                ":ticker": ticker,
+                ":title": a.headline.slice(0, 250),
+                ":url": a.url,
+                ":summary": a.summary?.slice(0, 400) || null,
+                ":source": a.source || "finnhub",
+                ":published_at": new Date(a.datetime * 1000).toISOString(),
+              } as any
+            );
+            inserted++;
+          } catch {}
+        }
+        saveDb();
+      } catch (e) {
+        console.warn(`Stock news ${ticker} error:`, e);
+      }
+
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    // Prune old + cap at 200
+    db.run("DELETE FROM stock_news WHERE published_at < datetime('now', '-5 days')");
+    db.run(
+      "DELETE FROM stock_news WHERE id NOT IN (SELECT id FROM stock_news ORDER BY published_at DESC LIMIT 200)"
+    );
+    saveDb();
+    console.log(`Stock news: ${tickers.length} tickers, ${inserted} new articles`);
+  }
+
+  return { fetchCoinGecko, fetchCryptoPrices, fetchStocks, fetchHN, fetchVIX, fetchStockNews };
 }

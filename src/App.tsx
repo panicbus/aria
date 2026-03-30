@@ -9,7 +9,7 @@ import { ScannerTab } from "./components/tabs/ScannerTab";
 import { ChatTab } from "./components/chat/ChatTab";
 import { HoldingsAccordion } from "./components/sidebar/HoldingsAccordion";
 import { MarketPulseAccordion } from "./components/sidebar/MarketPulseAccordion";
-import { TechNewsTab } from "./components/tabs/TechNewsTab";
+import { NewsTab } from "./components/tabs/NewsTab";
 import { SignalsTab } from "./components/tabs/SignalsTab";
 import { BuildPhaseList } from "./components/sidebar/BuildPhaseList";
 import { MobileNav } from "./components/nav/MobileNav";
@@ -61,7 +61,6 @@ export default function App() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [holdingsOpen, setHoldingsOpen] = useState(true);
   const [ohlcvRefreshAll, setOhlcvRefreshAll] = useState(false);
-  const [marketPulseOpen, setMarketPulseOpen] = useState(true);
   const [sidebarRefreshTrigger, setSidebarRefreshTrigger] = useState(0);
   const [backtestPreselectedTicker, setBacktestPreselectedTicker] = useState<string | null>(null);
   const [quickMode, setQuickMode] = useState(false);
@@ -130,7 +129,16 @@ export default function App() {
     const load = () => {
       fetch(`${API}/signals`)
         .then(r => r.json())
-        .then((data: Signal[]) => setSignals(data))
+        .then((data: Signal[]) => {
+          const seen = new Set<string>();
+          const deduped = data.filter((s) => {
+            const key = s.ticker.toUpperCase().trim();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          });
+          setSignals(deduped);
+        })
         .catch(() => setSignals([]));
     };
     load();
@@ -243,7 +251,10 @@ export default function App() {
         {/* Header */}
         <header className="aria-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", backdropFilter: "blur(10px)", position: "sticky", top: 0, zIndex: 10 }}>
           <div>
-            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.15em", fontFamily: "var(--display)", background: "linear-gradient(135deg, #00ff94, #00d4aa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>ARIA</div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+              <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.15em", fontFamily: "var(--display)", background: "linear-gradient(135deg, #00ff94, #00d4aa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>ARIA</span>
+              <span style={{ fontSize: 9, color: "#555", fontFamily: "var(--mono)", letterSpacing: "0.05em" }}>v1.7.2</span>
+            </div>
             <div className="aria-subtitle" style={{ fontSize: 9, color: "#444", letterSpacing: "0.1em", fontFamily: "var(--mono)" }}>AUTONOMOUS RESEARCH & INTELLIGENCE ASSISTANT</div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
@@ -285,8 +296,6 @@ export default function App() {
               }}
             />
             <MarketPulseAccordion
-              open={marketPulseOpen}
-              onToggle={() => setMarketPulseOpen((o) => !o)}
               refreshTrigger={sidebarRefreshTrigger}
             />
             <BuildPhaseList />
@@ -349,7 +358,7 @@ export default function App() {
             ) : activeTab === "briefing" ? (
               <BriefingTab />
             ) : activeTab === "news" ? (
-              <TechNewsTab />
+              <NewsTab />
             ) : activeTab === "memory" ? (
               <MemoryTab
               memories={memories}

@@ -177,7 +177,7 @@ If MEMORY includes key aria_system_db_size, it is an automatic capacity warning 
 
 // ── Live data (prices, news, signals) ──────────────────────────────────────────
 // Base tickers always fetched. Memory watchlist (Portfolio tab) adds more — no code change needed.
-const BASE_TICKERS = ["SPY", "BTC", "ETH", "AMD", "AMZN", "CLS"];
+const BASE_TICKERS = ["SPY", "QQQ", "BTC", "ETH", "AMD", "AMZN", "CLS"];
 const CRYPTO_COINGECKO_IDS: Record<string, string> = { BTC: "bitcoin", ETH: "ethereum" };
 
 // WAYPOINT [getWatchedTickers]
@@ -226,7 +226,9 @@ const COINGECKO_ID_TO_SYMBOL: Record<string, string> = { bitcoin: "BTC", ethereu
 // Live data fetchers created in start() after db init
 let fetchCoinGecko: () => Promise<void>;
 let fetchStocks: () => Promise<void>;
+let fetchVIX: () => Promise<void>;
 let fetchHN: () => Promise<void>;
+let fetchStockNews: () => Promise<void>;
 
 // ── Start (async: load sql.js and DB file) ─────────────────────────────────────
 async function start() {
@@ -338,6 +340,20 @@ async function start() {
       category TEXT,
       scanned_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS stock_news (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ticker TEXT NOT NULL,
+      title TEXT NOT NULL,
+      url TEXT UNIQUE NOT NULL,
+      summary TEXT,
+      source TEXT,
+      published_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stock_news_published
+    ON stock_news(published_at DESC);
 
     CREATE TABLE IF NOT EXISTS crypto_portfolio (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -476,7 +492,9 @@ async function start() {
   const fetchCryptoPrices = liveData.fetchCryptoPrices;
   fetchCoinGecko = liveData.fetchCoinGecko;
   fetchStocks = liveData.fetchStocks;
+  fetchVIX = liveData.fetchVIX;
   fetchHN = liveData.fetchHN;
+  fetchStockNews = liveData.fetchStockNews;
 
   const runBacktest = createRunBacktest({ db, execAll, getWatchedTickers });
 
@@ -656,7 +674,9 @@ async function start() {
   Promise.resolve().then(async () => {
     await fetchCryptoPrices();
     await fetchStocks();
+    await fetchVIX();
     await fetchHN();
+    await fetchStockNews();
     await refreshCryptoPortfolio();
     await fetchAndStoreOHLCV();
     generateSignals();
@@ -664,8 +684,10 @@ async function start() {
 
   setInterval(fetchCryptoPrices, PRICE_INTERVAL_MS);
   setInterval(fetchStocks, PRICE_INTERVAL_MS);
+  setInterval(fetchVIX, PRICE_INTERVAL_MS);
   setInterval(refreshCryptoPortfolio, PRICE_INTERVAL_MS);
   setInterval(fetchHN, NEWS_INTERVAL_MS);
+  setInterval(fetchStockNews, NEWS_INTERVAL_MS);
   setInterval(generateSignals, SIGNAL_INTERVAL_MS);
 
   const TZ = "America/Los_Angeles";
