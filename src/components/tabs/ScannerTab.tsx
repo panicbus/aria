@@ -160,7 +160,6 @@ export function ScannerTab({
 
   const topPicks = results.slice(0, 10);
   const allFiltered = filterResults(results, filter);
-  const apiLimitReached = status != null && status.apiCallsRemaining <= 0;
   const pendingCandidates = candidates.filter((c) => c.status === "pending");
 
   const metricsExplainer = (
@@ -260,12 +259,6 @@ export function ScannerTab({
           ))}
         </div>
       </div>
-
-      {apiLimitReached && (
-        <div style={{ padding: "10px 14px", background: "rgba(255,212,42,0.1)", border: "1px solid rgba(255,212,42,0.3)", borderRadius: 8, fontSize: 16, color: "#ffd32a", fontFamily: "var(--mono)" }}>
-          API limit reached for today. Full indicators available for {status?.tickersScanned ?? 0} tickers. Remaining tickers show price data only.
-        </div>
-      )}
 
       {error && (
         <div style={{ padding: "10px 14px", background: "rgba(255,71,87,0.1)", border: "1px solid rgba(255,71,87,0.3)", borderRadius: 8, fontSize: 16, color: "#ff6b6b", fontFamily: "var(--mono)" }}>
