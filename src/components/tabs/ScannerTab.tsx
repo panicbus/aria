@@ -345,13 +345,6 @@ export function ScannerTab({
                   >
                     {addingTicker === r.symbol ? "Adding…" : isMobile ? "+ watchlist" : "Add to Watchlist"}
                   </button>
-                  <button
-                    className="scanner-backtest-btn"
-                    onClick={() => onViewBacktest?.(r.symbol)}
-                    style={{ fontSize: 15, fontFamily: "var(--mono)", padding: "5px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.2)", background: "transparent", color: "#888", cursor: "pointer" }}
-                  >
-                    View Backtest
-                  </button>
                 </div>
               </div>
             ))}
