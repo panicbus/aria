@@ -254,7 +254,7 @@ export default function App() {
           <div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
               <span style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.15em", fontFamily: "var(--display)", background: "linear-gradient(135deg, #00ff94, #00d4aa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>ARIA</span>
-              <span style={{ fontSize: 9, color: "#555", fontFamily: "var(--mono)", letterSpacing: "0.05em" }}>v1.7.3</span>
+              <span style={{ fontSize: 9, color: "#555", fontFamily: "var(--mono)", letterSpacing: "0.05em" }}>v1.7.4</span>
             </div>
             <div className="aria-subtitle" style={{ fontSize: 9, color: "#444", letterSpacing: "0.1em", fontFamily: "var(--mono)" }}>AUTONOMOUS RESEARCH & INTELLIGENCE ASSISTANT</div>
           </div>

@@ -116,8 +116,8 @@ export function NewsTab() {
   };
 
   return (
-    <div className="tab-news" style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <div className="tab-news" style={{ flex: 1, overflowY: "auto", padding: "0 24px 20px", display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "#0e0e0e", paddingTop: 20, paddingBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ fontSize: 16, letterSpacing: "0.12em", color: "#999", fontWeight: 600, fontFamily: "var(--mono)" }}>
           NEWS
         </div>

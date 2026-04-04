@@ -4,7 +4,7 @@ import cors from "cors";
 import initSqlJs from "sql.js";
 import path from "path";
 import fs from "fs";
-import cron from "node-cron";
+import { Cron } from "croner";
 
 import { createFetchAndStoreOHLCV } from "./services/ohlcv";
 import { createRunBacktest } from "./services/backtest";
@@ -717,67 +717,79 @@ async function start() {
   const TZ = "America/Los_Angeles";
 
   // DB backup — 3am Pacific every 3 days (days 1, 4, 7, 10, …)
-  cron.schedule("0 3 */3 * *", () => {
+  new Cron("0 3 */3 * *", { timezone: TZ }, () => {
     backupDb();
-  }, { timezone: TZ });
+  });
 
-  // Prune old OHLCV + chat history — 04:00 Pacific daily (before OHLCV refresh). Caps DB size for sql.js.
-  cron.schedule("0 4 * * *", () => {
+  // Prune old OHLCV + chat history — 04:00 Pacific daily
+  new Cron("0 4 * * *", { timezone: TZ }, () => {
     try {
       pruneStorage();
     } catch (err) {
       console.error("[cron] Prune failed:", err);
     }
-  }, { timezone: TZ });
+  });
 
-  // Weekly nomination — Sunday at 05:00 Pacific (before OHLCV fetch)
-  cron.schedule("0 5 * * 0", () => {
+  // Weekly nomination — Sunday at 05:00 Pacific
+  new Cron("0 5 * * 0", { timezone: TZ }, () => {
     scannerService.runWeeklyNomination().catch((err) => console.error("[cron] Nomination failed:", err));
-  }, { timezone: TZ });
+  });
 
   // OHLCV refresh + graduation + signal outcome checking — daily at 06:00 Pacific
-  cron.schedule("0 6 * * *", () => {
+  new Cron("0 6 * * *", { timezone: TZ }, () => {
     fetchAndStoreOHLCV()
       .then(() => scannerService.checkSignalOutcomes())
       .catch((err) => console.error("OHLCV refresh failed:", err));
-  }, { timezone: TZ });
+  });
 
-  // Scanner — daily at 07:30 Pacific (90 min after OHLCV to avoid overlap)
-  cron.schedule("30 7 * * *", () => {
-    scannerService.runScan().catch((err) => console.error("Scanner failed:", err));
-  }, { timezone: TZ });
-
-  // Morning briefing — every weekday at 08:30 Pacific (60 min after scanner)
-  cron.schedule("30 8 * * 1-5", async () => {
+  // Morning briefing — every weekday at 07:00 Pacific
+  new Cron("0 7 * * 1-5", { timezone: TZ }, async () => {
     const now = new Date().toLocaleString("en-US", { timeZone: TZ });
     console.log("[cron] Morning briefing triggered at", now);
     try {
-      const briefing = await generateBriefing();
-      if (briefing?.content) {
-        const sent = await sendBriefingEmail(briefing.content, `ARIA Morning Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: TZ })}`);
+      const out = await generateBriefing();
+      if (out?.briefing?.content) {
+        const sent = await sendBriefingEmail(
+          out.briefing.content,
+          `ARIA Morning Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: TZ })}`,
+          out.portfolioHtml,
+          out.stocksNewsHtml,
+          out.plainTextBody,
+        );
         if (sent) console.log("[cron] Morning briefing sent by email");
         else console.log("[cron] Morning briefing stored (email not configured)");
       }
     } catch (err) {
       console.error("[cron] Morning briefing failed:", err);
     }
-  }, { timezone: TZ });
+  });
 
-  // Evening briefing — every weekday at 18:00 Pacific
-  cron.schedule("0 18 * * 1-5", async () => {
+  // Scanner — daily at 08:00 Pacific (60 min after morning briefing)
+  new Cron("0 8 * * *", { timezone: TZ }, () => {
+    scannerService.runScan().catch((err) => console.error("Scanner failed:", err));
+  });
+
+  // Evening briefing — every weekday at 20:00 Pacific
+  new Cron("0 20 * * 1-5", { timezone: TZ }, async () => {
     const now = new Date().toLocaleString("en-US", { timeZone: TZ });
     console.log("[cron] Evening briefing triggered at", now);
     try {
-      const briefing = await generateEveningBriefing();
-      if (briefing?.content) {
-        const sent = await sendBriefingEmail(briefing.content, `ARIA Evening Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: TZ })}`);
+      const out = await generateEveningBriefing();
+      if (out?.briefing?.content) {
+        const sent = await sendBriefingEmail(
+          out.briefing.content,
+          `ARIA Evening Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: TZ })}`,
+          out.portfolioHtml,
+          out.stocksNewsHtml,
+          out.plainTextBody,
+        );
         if (sent) console.log("[cron] Evening briefing sent by email");
         else console.log("[cron] Evening briefing stored (email not configured)");
       }
     } catch (err) {
       console.error("[cron] Evening briefing failed:", err);
     }
-  }, { timezone: TZ });
+  });
 }
 
 start().catch((err) => {

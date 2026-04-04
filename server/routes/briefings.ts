@@ -4,6 +4,7 @@
  */
 
 import { Router, Request, Response } from "express";
+import { sendBriefingLayoutPreviewEmail, type BriefingGenerationResult } from "../services/briefings";
 
 type BriefingRow = { id: number; content: string; created_at: string; type: "morning" | "evening" };
 
@@ -11,9 +12,15 @@ type DbContext = {
   db: import("sql.js").Database;
   execAll: <T extends Record<string, unknown>>(sql: string) => T[];
   saveDb: () => void;
-  generateBriefing: () => Promise<BriefingRow | null>;
-  generateEveningBriefing: () => Promise<BriefingRow | null>;
-  sendBriefingEmail: (content: string, subject: string) => Promise<boolean>;
+  generateBriefing: () => Promise<BriefingGenerationResult | null>;
+  generateEveningBriefing: () => Promise<BriefingGenerationResult | null>;
+  sendBriefingEmail: (
+    content: string,
+    subject: string,
+    portfolioHtml?: string,
+    stocksNewsHtml?: string,
+    plainTextBody?: string,
+  ) => Promise<boolean>;
 };
 
 export function createBriefingsRouter(ctx: DbContext): Router {
@@ -86,6 +93,14 @@ export function createBriefingsRouter(ctx: DbContext): Router {
       });
     }
     try {
+      const useLayout = req.query.layout === "1" || req.query.layout === "true";
+      if (useLayout) {
+        const sent = await sendBriefingLayoutPreviewEmail();
+        if (sent) {
+          return res.json({ ok: true, message: "Layout preview email sent to " + to, kind: "layout_preview" });
+        }
+        return res.status(500).json({ ok: false, error: "sendBriefingLayoutPreviewEmail returned false (check server logs)" });
+      }
       const subject = `ARIA Test Email — ${new Date().toLocaleString("en-US", { timeZone: "America/Los_Angeles" })}`;
       const content = "This is a test email from ARIA. If you received this, briefing email delivery is working.";
       const sent = await sendBriefingEmail(content, subject);
@@ -109,11 +124,18 @@ export function createBriefingsRouter(ctx: DbContext): Router {
 
   router.post("/generate", async (req: Request, res: Response) => {
     try {
-      const briefing = await generateBriefing();
-      if (!briefing) {
+      const out = await generateBriefing();
+      if (!out?.briefing) {
         return res.status(500).json({ error: "Failed to generate briefing" });
       }
-      const sent = await sendBriefingEmail(briefing.content, `ARIA Morning Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}`);
+      const { briefing, portfolioHtml, stocksNewsHtml, plainTextBody } = out;
+      const sent = await sendBriefingEmail(
+        briefing.content,
+        `ARIA Morning Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}`,
+        portfolioHtml,
+        stocksNewsHtml,
+        plainTextBody,
+      );
       res.json({ ...briefing, email_sent: sent });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -128,11 +150,18 @@ export function createBriefingsRouter(ctx: DbContext): Router {
 
   router.post("/generate-evening", async (req: Request, res: Response) => {
     try {
-      const briefing = await generateEveningBriefing();
-      if (!briefing) {
+      const out = await generateEveningBriefing();
+      if (!out?.briefing) {
         return res.status(500).json({ error: "Failed to generate evening briefing" });
       }
-      const sent = await sendBriefingEmail(briefing.content, `ARIA Evening Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}`);
+      const { briefing, portfolioHtml, stocksNewsHtml, plainTextBody } = out;
+      const sent = await sendBriefingEmail(
+        briefing.content,
+        `ARIA Evening Briefing — ${new Date().toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}`,
+        portfolioHtml,
+        stocksNewsHtml,
+        plainTextBody,
+      );
       res.json({ ...briefing, email_sent: sent });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
